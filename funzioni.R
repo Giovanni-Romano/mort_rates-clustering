@@ -66,21 +66,21 @@ rCRP <- function(n, M){
 #### CONTROLLO PER COMPATIBILITA' ####
 ### ### ### ### ### ### ### ### ### ##
 are.partitions.equal <- function(part1, part2){
-  part1_sort <- part1 %>%
-    sapply(., '[[', 1) %>% 
-    order() %>% 
-    part1[.] %>% 
-    lapply(., sort)
-  
-  part2_sort <- part2 %>%
-    sapply(., '[[', 1) %>% 
-    order() %>% 
-    part2[.] %>% 
-    lapply(., sort)
-  
-  # Se la setdiff tra gli insiemi delle due liste ha lunghezza 0, vuol dire
-  # che tutti gli insiemi sono uguali
-  check <- (length(setdiff(part1_sort, part2_sort)) == 0)
+  # part1_sort <- part1 %>%
+  #   sapply(., '[[', 1) %>% 
+  #   order() %>% 
+  #   part1[.] %>% 
+  #   lapply(., sort)
+  # 
+  # part2_sort <- part2 %>%
+  #   sapply(., '[[', 1) %>% 
+  #   order() %>% 
+  #   part2[.] %>% 
+  #   lapply(., sort)
+  # 
+  # # Se la setdiff tra gli insiemi delle due liste ha lunghezza 0, vuol dire
+  # # che tutti gli insiemi sono uguali
+  # check <- (length(setdiff(part1_sort, part2_sort)) == 0)
   
   
   
