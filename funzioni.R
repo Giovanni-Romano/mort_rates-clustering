@@ -101,100 +101,6 @@ are.partitions.equal <- function(part1, part2){
 
 
 
-### ### ### ##
-#### FBBS ####
-### (per joint distr. degli stati  ### ###
-### latenti date tutte le osservazioni) ###
-### ### ### ### ### ### ### ### ### ### ###
-
-FFBS <- function(filt, mu){
-  ### ###
-  ### - filt è l'oggetto di KFS con i risultati del filtering
-  ### - mu la matrice avente alla riga t il vettore delle medie
-  ###     dello stato latente al tempo t
-  
-  # In KFAS:
-  #   - "signal" è Z*alpha_t, cioè la media dello stato osservato
-  #   - "state" è alpha_t, cioè lo stato latente
-  #   - per SSM Gaussiani "mean" coincide con "signal"
-  
-  # Dall'output ci servono i seguenti oggetti:
-  #   - a: media della latent predictive (a_t.tilde sul foglio);
-  #         ci sono 89 valori, non so bene da che tempo a che tempo sono, forse
-  #         da t = 1 fino a t = T+1 (visto che T = 88)
-  #   - P: var. della latent predictive (R_t sul foglio);
-  #         come per "a", ci sono 89 valori
-  #   - att: media della filtering (m_t.tilde sul foglio)
-  #   - Ptt: var. della filtering (C_t)
-  #   - P_mu: var. della predictive di Z*alpha_t (F*R_t*F' sul foglio),
-  #             unita alla var. dello stato osservato dà la var. della
-  #             predictive (sul foglio Q_t)
-  
-  model <- filt$model
-  
-  # Per ora forzo io T_final a 87 perché ITA ha solo 87 istanti mentre
-  #   le altre nazioni 88, ma non mi sembra abbia senso considerare anche
-  #   l'88° istante
-  T_final <- 87 #attr(model, "n")
-  p <- attr(model, "m")
-  
-  # Do il nome agli oggetti come sul libro di Petris e Petrone
-  W <- model$Q[,,1]
-  V <- model$H[,,1]
-  F_ <- model$Z[,,1]
-  G <- model$T[,,1]
-  
-  m.tilde <- filt$att
-  a.tilde <- filt$a
-  R <- filt$P
-  C <- filt$Ptt
-  Q_temp <- apply(filt$P_mu, 3, function(x) x+V, simplify = F)
-  Q <- array(unlist(Q_temp), 
-             dim = c(attr(model, "p"), attr(model, "p"), T_final+1))
-  
-  
-  out <- matrix(999999, T_final, p)
-  
-  # Step dal filtering all'ultimo istante
-  filt_mean <- m.tilde[T_final, ] +
-    (diag(1, p) - R[,,T_final] %*% t(F_) %*% mysolve(Q[,,T_final]) %*% F_) %*% mu[T_final, ]
-  # out[T_final, ] <-  rmvn(1,
-  #                         mu = m.tilde[T_final, ], sigma = C[,,T_final])
-  out[T_final, ] <-  rmvn(1,
-                          mu = filt_mean, sigma = C[,,T_final])
-  # La varianza del filtering non cambia anche con una media dell'errore diversa da 0
-
-  for (t in (T_final-1):1){
-    # CGRm1 <- C[,,t] %*% t(G) %*% solve(R[,,t+1]) # C_t * G' * R_{t+1}^{-1}
-    CGRm1 <- C[,,t] %*% t(G) %*% mysolve(R[,,t+1]) # C_t * G' * R_{t+1}^{-1}
-
-    # back_mean <- m.tilde[t, ] + CGRm1 %*% (out[t+1, ] - a.tilde[t+1, ]) +
-    #   (diag(1, p) - R[,,t] %*% t(F_) %*% solve(Q[,,t]) %*% F_) %*% mu[t, ] -
-    #   CGRm1 %*% mu[t+1, ]
-    back_mean <- m.tilde[t, ] + CGRm1 %*% (out[t+1, ] - a.tilde[t+1, ]) +
-      (diag(1, p) - R[,,t] %*% t(F_) %*% mysolve(Q[,,t]) %*% F_) %*% mu[t, ] -
-      CGRm1 %*% mu[t+1, ]
-
-    back_sigma <- C[,,t] - CGRm1 %*% G %*% C[,,t]
-
-    # out[t, ] <- rmvnorm(1, mean = back_mean, sigma = back_sigma)
-    out[t, ] <- rmvn(1,
-                     mu = back_mean, sigma = back_sigma)
-  }
-  
-  # filt_mean <- m.tilde[T_final, ]
-  # out[T_final, ] <-  rmvn(1,
-  #                         mu = filt_mean, sigma = C[,,T_final])
-  # for (t in (T_final-1):1){
-  #   CGRm1 <- C[,,t] %*% t(G) %*% mysolve(R[,,t+1]) # C_t * G' * R_{t+1}^{-1}
-  #   back_mean <- m.tilde[t, ] + CGRm1 %*% (out[t+1, ] - a.tilde[t+1, ])
-  #   back_sigma <- C[,,t] - CGRm1 %*% G %*% C[,,t]
-  #   out[t, ] <- rmvn(1, mu = back_mean, sigma = back_sigma)
-  # }
-  
-  return(out)
-}
-
 ### ### ### ### ### ##
 #### UPDATE GAMMA ####
 ### ### ### ### ### ##
@@ -221,14 +127,12 @@ up_gamma_i <- function(i, gamma, alpha_t, rho_t, rho_tm1){
       rho_tm1.R[[length(rho_tm1.R) + 1]] <- rho_tm1[[j]][rho_tm1[[j]] %in% R_tpi]
     }
   }
-  # rho_tm1.R <- compact(rho_tm1.R)
   
   for (j in 1:length(rho_t)){
     if (sum(rho_t[[j]] %in% R_tpi) > 0){
       rho_t.R[[length(rho_t.R) + 1]] <- rho_t[[j]][rho_t[[j]] %in% R_tpi]
     }
   }
-  # rho_t.R <- purrr::compact(rho_t.R)
   
   
   ############################################################################
@@ -240,15 +144,12 @@ up_gamma_i <- function(i, gamma, alpha_t, rho_t, rho_tm1){
   check <- are.partitions.equal(rho_tm1.R, rho_t.R)
   
   
-  
   # Vedi formula S.9 del materiale supplementare di Page
   # Devo calcolare la predictive per l'i-esima osservazione data la 
   #   partizione ridotta a R_{t-1}^{(-i)}
   
   # Trova insieme della partizione con dentro i
-  # j <- which(sapply(rho_t.R, function(x) i %in% x))
   j <- which(vapply(rho_t.R, is.element, el = i, FUN.VALUE = FALSE))
-  # n <- sum(sapply(rho_t.R, length)) - 1
   n <- sum(vapply(rho_t.R, length, FUN.VALUE = integer(1))) - 1
   
   if (n == 0) { # se la partizione a cui ci condizioniamo è vuota
@@ -301,21 +202,15 @@ up_label_i <- function(i, j,
   ### - newclustermean: media per il nuovo cluster
   
   # Inizializzazione vettore probabilità della multinomiale
-  # prob <- c()
   logp <- c()
   
   # Cluster in cui è l'i-esima osservazione
-  # k <- which(sapply(rho_t, function(x) i %in% x))
   k <- which(vapply(rho_t, is.element, el = i, FUN.VALUE = FALSE))
   
   # Partizione senza i-esima osservazione
   rho_tmi <- rho_t
   rho_tmi[[k]] <- rho_tmi[[k]][rho_tmi[[k]] != i]
-  # rho_tmi <- purrr::compact(rho_tmi)
-  # # Numerosità di questa partizione
-  # K_mi <- length(rho_tmi)
   
-  # whichcluster <- c(which(sapply(rho_tmi, function(x) length(x)>0)), length(rho_t)+1)
   whichcluster <- c(which(vapply(rho_tmi, function(x) length(x)>0, FUN.VALUE = FALSE)), 
                     length(rho_t)+1L)
   # Uso "1L" per farlo venire integer, altrimenti il "+1" lo rende un float
@@ -345,7 +240,6 @@ up_label_i <- function(i, j,
     #   per il j-esima coeff. la mu che ho appena calcolato.
     #
     muvec_t[1 + 3 * (j-1)] <- mu
-    # prob_gauss <- mvtnorm::dmvnorm(b_it, mean = muvec_t + T_ %*% b_itm1, sigma = Q)
     
     # Nel paper di Page: indicatrice sulle partizioni ridotte
     #   per prima cosa devo trovare la partizione ridotta
@@ -379,10 +273,8 @@ up_label_i <- function(i, j,
     
     logp <- c(logp, 
               log(prob_cit) + logpnorm + log(check))
-    # prob <- c(prob, prob_cit*prob_gauss*check)
   }
   
-  # c_it <- sample(1:(K_mi + 1), 1, prob = prob)
   
   # Almeno nelle prime iterazioni sembra che le prob siano tutte 0, 
   #   quindi devo lavorare in scala logaritmica. Per campionare dalle 
@@ -450,36 +342,10 @@ up_mustar <- function(j, k, t,
   mu <- drop(mu)
   
   # Devo togliere le Q delle osservazioni che non usiamo
-  # for (iii in setdiff(1:n, obs)){
-  #   Q_list[[iii]] <- integer(0)
-  # }
-  # Q_list <- purrr::compact(Q_list)
   Q_list.new <- list()
   for (iii in obs){
     Q_list.new[[length(Q_list.new) + 1]] <- Q_list[[iii]]
   }
-  
-  # # C'è una piccola complicazione dovuta al fatto che la prior è su una sola
-  # #   componente di una Normale multivariata; ho fatto i conti su come vengono
-  # #   media e varianza della posteriori, ma sostanzialmente è come fare la
-  # #   conjugacy con le condizionate di b_{ijt} dato b_{i(-j)t}
-  # Q.inv <- lapply(Q_list.new, function(x) mysolve(x))
-  # A <- Reduce('+', lapply(Q.inv, function(x) x[j, j])) + 
-  #   1 / priorv
-  # # Q.inv_j è una matrice n*p avente per riga i-esima il vettore Q.inv[[i]][, j],
-  # #   cioè i coefficienti P_{jk}^{(i)} per ogni k (vedi foglio)
-  # Q.inv_j <- do.call(rbind, lapply(Q.inv, function(x) x[j, ]))
-  # if (!is.matrix(b.tilde)){
-  #   B <- priorm + 
-  #     sum(sum(Q.inv_j[-j] * (b.tilde - mu)[-j]) + Q.inv_j[j] * b.tilde[j])
-  # } else{
-  #   B <- priorm/priorv + 
-  #     sum(rowSums(Q.inv_j[, -j] * (b.tilde - mu)[, -j]) + Q.inv_j[, j] * b.tilde[, j])
-  # }
-  # 
-  # 
-  # post.var <- A^(-1)
-  # post.mean <- post.var * B
   
   n_k <- length(Q_list.new)
   p <- nrow(Q_list.new[[1]])
