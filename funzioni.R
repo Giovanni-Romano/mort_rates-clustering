@@ -176,30 +176,27 @@ up_gamma_i <- function(i, gamma, alpha_t, rho_t, rho_tm1){
 #### UPDATE CLUSTER LABELS ####
 ### ### ### ### ### ### ### ###
 up_label_i <- function(i, j,
-                       b_it, b_itm1,
-                       mustarvec_jt, muvec_t,
-                       T_, Q,
+                       Y_it,
+                       beta_i,
+                       beta_cluster,
+                       sigma2_i,
                        rho_t, rho_tp1, gamma_tp1,
-                       newclustermean) {
+                       newclustervalue,
+                       spline_basis) {
   
   ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ###
   ### - i: indice dell'unità che stiamo aggiornando
   ### - j: indice del coefficiente che stiamo aggiornando
-  ### - b_it: valore stato latente per unità i al tempo t
-  ### - b_itm1: valore stato latente per unità i t-1
-  ### - mustarvec_jt: vettore con le medie dei cluster per il coeff. j al tempo t
-  ### - muvec_t: vettore con le medie degli errori dello stato latente al tempo t;
-  ###             N.B.: i valori che vanno passati dipendono dal valore delle
-  ###                   label al tempo t all'iterazione corrente
-  ### - T_: matrice del sistema di equazioni dello stato latente (l'underscore
-  ###       c'è solo perché non posso chiamarlo T per via di TRUE)
-  ### - Q: matrice var-cov degli errori dello stato latente; per ora è fissata,
-  ###       perciò non ha nessuna prior
+  ### - Y_it: vettore con Y_{ixt} per ogni x
+  ### - beta_i: vettore con i beta dell'osservazione i-esima al tempo
+  ### - beta_cluster: vettore con i beta dei cluster del j-esimo coeff.
+  ### - sigma2_i: varianza dell'i-esima osservazione
   ### - rho_t: partizione al tempo t PER IL COEFF j
   ### - rho_tp1: partizione al tempo t+1 PER IL COEFF j
   ### - gamma_tp1: gamma_{t+1}, per trovare la partizione ridotta;
   ###               all'istante finale passare 'last time'
-  ### - newclustermean: media per il nuovo cluster
+  ### - newclustevalue: valore per il nuovo cluster
+  ### - spline_basis: matrice con i valori delle basi spline
   
   # Inizializzazione vettore probabilità della multinomiale
   logp <- c()
@@ -211,35 +208,34 @@ up_label_i <- function(i, j,
   rho_tmi <- rho_t
   rho_tmi[[k]] <- rho_tmi[[k]][rho_tmi[[k]] != i]
   
-  whichcluster <- c(which(vapply(rho_tmi, function(x) length(x)>0, FUN.VALUE = FALSE)), 
-                    length(rho_t)+1L)
+  whichclusters <- c(which(vapply(rho_tmi, function(x) length(x)>0, FUN.VALUE = FALSE)), # cluster esistenti
+                    length(rho_t)+1L) # cluster nuovo
   # Uso "1L" per farlo venire integer, altrimenti il "+1" lo rende un float
   
-  for (h in whichcluster){
+  for (h in whichclusters){
     # Devo costruire la partizione con l'i-esima osservazione inserita
     #   nell'h-esimo cluster
     rho_t.h <- rho_tmi
-    if (h < max(whichcluster)){ # se assegno ad un cluster già esistente
+    if (h < max(whichclusters)){ # se assegno ad un cluster già esistente
       rho_t.h[[h]] <- c(rho_t.h[[h]], i) 
     } else { # se assegno al nuovo cluster
       rho_t.h[[h]] <- i 
     }
     
-    # Nel paper di Page: Pr(c_it = h)
-    # prob_cit <- dCRP(sapply(rho_t.h, length), M)
+    # Nel paper di Page: Pr(c_it = h).
     prob_cit <- dCRP(vapply(rho_t.h, length, FUN.VALUE = integer(1)), M)
     
-    # Nel paper di Page: N(Y_it | bla bla);
-    #   io devo usare la densità della normale multivariata
-    if (h < max(whichcluster)){ # se il cluster è già esistente, devo usare la media di quel cluster
-      mu <- mustarvec_jt[h]
+    # Nel paper di Page: N(Y_it | bla bla).we
+    # Per me ci sarà il prodotto di Pr(Y_{ixt} |  beta, ecc) per tutti gli x.
+    if (h < max(whichcluster)){ # se il cluster è già esistente, devo usare il beta di quel cluster
+      beta <- beta_cluster[h]
     } else { # se il cluster è nuovo, devo simulare la media dalla prior
-      mu <- newclustermean
+      beta <- newclustervalue
     }
-    # La media che devo usare è il vettore delle medie mu_vec, sostituendo in
-    #   per il j-esima coeff. la mu che ho appena calcolato.
+    # I beta che devo usare sono il vettore beta_j, sostituendo
+    #   per il j-esimo coeff. il beta che ho appena calcolato.
     #
-    muvec_t[1 + 3 * (j-1)] <- mu
+    beta_i[j] <- beta
     
     # Nel paper di Page: indicatrice sulle partizioni ridotte
     #   per prima cosa devo trovare la partizione ridotta
@@ -266,10 +262,11 @@ up_label_i <- function(i, j,
       check <- are.partitions.equal(rho_t.h.R, rho_tp1.R)
     }
       
-    meantopass <- muvec_t + T_ %*% b_itm1
-    logpnorm <- mvnfast::dmvn(b_it,
-                              mu = meantopass, sigma = Q,
-                              log = TRUE)
+    means <- spline_basis %*% beta
+    logpnorm <- sum(dnorm(Y_it, 
+                          mean = ,
+                          sd = sqrt(sigma2_i),
+                          log = TRUE))
     
     logp <- c(logp, 
               log(prob_cit) + logpnorm + log(check))
