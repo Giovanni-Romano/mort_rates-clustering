@@ -188,8 +188,8 @@ up_label_i <- function(i, j,
   ### - i: indice dell'unità che stiamo aggiornando
   ### - j: indice del coefficiente che stiamo aggiornando
   ### - Y_it: vettore con Y_{ixt} per ogni x
-  ### - beta_i: vettore con i beta dell'osservazione i-esima al tempo
-  ### - beta_cluster: vettore con i beta dei cluster del j-esimo coeff.
+  ### - beta_i: vettore con i beta dell'osservazione i-esima al tempo t
+  ### - beta_cluster: vettore con i beta dei cluster del j-esimo coeff. al tempo t
   ### - sigma2_i: varianza dell'i-esima osservazione
   ### - rho_t: partizione al tempo t PER IL COEFF j
   ### - rho_tp1: partizione al tempo t+1 PER IL COEFF j
@@ -208,8 +208,8 @@ up_label_i <- function(i, j,
   rho_tmi <- rho_t
   rho_tmi[[k]] <- rho_tmi[[k]][rho_tmi[[k]] != i]
   
-  whichclusters <- c(which(vapply(rho_tmi, function(x) length(x)>0, FUN.VALUE = FALSE)), # cluster esistenti
-                    length(rho_t)+1L) # cluster nuovo
+  whichclusters <- which(vapply(rho_tmi, function(x) length(x)>0, FUN.VALUE = FALSE)) # cluster esistenti
+  whichclusters <- c(whichclusters, max(whichclusters)+1L) # aggiungo il possibile cluster nuovo
   # Uso "1L" per farlo venire integer, altrimenti il "+1" lo rende un float
   
   for (h in whichclusters){
@@ -227,7 +227,7 @@ up_label_i <- function(i, j,
     
     # Nel paper di Page: N(Y_it | bla bla).we
     # Per me ci sarà il prodotto di Pr(Y_{ixt} |  beta, ecc) per tutti gli x.
-    if (h < max(whichcluster)){ # se il cluster è già esistente, devo usare il beta di quel cluster
+    if (h < max(whichclusters)){ # se il cluster è già esistente, devo usare il beta di quel cluster
       beta <- beta_cluster[h]
     } else { # se il cluster è nuovo, devo simulare la media dalla prior
       beta <- newclustervalue
@@ -261,10 +261,10 @@ up_label_i <- function(i, j,
       }
       check <- are.partitions.equal(rho_t.h.R, rho_tp1.R)
     }
-      
-    means <- spline_basis %*% beta
+    
+    means <- drop(spline_basis %*% beta_i)
     logpnorm <- sum(dnorm(Y_it, 
-                          mean = ,
+                          mean = means,
                           sd = sqrt(sigma2_i),
                           log = TRUE))
     
@@ -280,7 +280,7 @@ up_label_i <- function(i, j,
   gumbel <- -log(-log(runif(length(lll))))
   lll <- lll + gumbel
   
-  c_it <- whichcluster[which.max(lll)]
+  c_it <- whichclusters[which.max(lll)]
   return(c_it)
 }
 
