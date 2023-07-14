@@ -6,6 +6,7 @@ library(tidyverse)
 library(invgamma)
 
 load("C:/Users/RomanoGi/Desktop/Bocconi/Ricerca/BSP_Pavone/output/mortality.Rdata")
+load("fit_indep.Rdata")
 source("funzioni.R")
 
 data_list_man <- list(ita_man = Y_ita_man / N_ita_man,
@@ -81,6 +82,11 @@ m0 <- 0; s02 <- 100
 #     ha varianza indefinita per alfa <= 2).
 a_tau <- a_delta <- a_xi <- 1
 b_tau <- b_delta <- b_xi <- 5
+# Varianza delle osservazioni: metto una prior comune alle sigma2_i.
+a_sigma <- 1
+b_sigma <- 5
+#   Uso una InvGamma con gli stessi parametri di sopra.
+
 # Parametro di concentrazione del CRP
 M <- 1
 
@@ -133,48 +139,80 @@ lambda_res <- xi_res <- rep(NA, n_iter)
 
 
 
-gamma_temp <- replicate(p,
-                        matrix(0,
-                               nrow = n, # numero di osservazioni
-                               ncol = T_final # numero istanti temporali
-                        ),
-                        simplify = FALSE)
-labels_temp <- replicate(p,
-                         matrix(NA,
-                                nrow = n, # numero di osservazioni
-                                ncol = T_final # numero istanti temporali
+gamma_temp <- labels_temp <-
+  beta_temp <- replicate(p,
+                         array(NA,
+                                dim = c(n, # numero di osservazioni
+                                        ncol = T_final # numero istanti temporali
+                                        )
                          ),
                          simplify = FALSE)
+theta_temp <- tau_temp <- replicate(p,
+                                  array(NA,
+                                        dim = c(T_final # numero istanti temporali
+                                                )
+                                        ),
+                                  simplify = FALSE)
+phi_temp <- delta_temp <- array(NA,
+                              dim = c(T_final # numero istanti temporali
+                                      )
+                              )
 
+lambda_temp <- xi_temp <- NA
+sigma_res <- array(NA,
+                   dim = c(n, # numero di osservazioni
+                           ncol = T_final # numero istanti temporali),
+                           )
+                   )
 
 
 
 ### ### ### ### ### ###
 ### Inizializzazioni ##
 ### ### ### ### ### ###
-lambda_res[1] <- rnorm(1, mean = m0, sd = sqrt(s02))
-xi_res[1] <- rinvgamma(1, a_xi, b_xi) 
+sigma_res[, 1] <- sigma_temp <- rinvgamma(n, a_sigma, b_sigma)
+  
+lambda_res[1] <- lambda_temp <- 
+  rnorm(1, mean = m0, sd = sqrt(s02))
+xi_res[1] <- xi_temp <- 
+  rinvgamma(1, a_xi, b_xi) 
 
-phi_res[, 1] <- rnorm(T_final, lambda_res[1], xi_res[1])
-delta_res[, 1] <- rinvgamma(T_final, a_delta, b_delta)
+phi_res[, 1] <- phi_temp <- 
+  rnorm(T_final, lambda_res[1], xi_res[1])
+delta_res[, 1] <- delta_temp <- 
+  rinvgamma(T_final, a_delta, b_delta)
 
 for (j in 1:p){
-  theta_res[[j]][ , 1] <- rnorm(T_final, phi_res[, 1], delta_res[, 1])
-  tau_res[[j]][ , 1] <- rinvgamma(T_final, a_tau, b_tau)
+  theta_res[[j]][ , 1] <- theta_temp[[j]] <- 
+    rnorm(T_final, phi_res[, 1], delta_res[, 1])
+  tau_res[[j]][ , 1] <- tau_temp[[j]] <- 
+    rinvgamma(T_final, a_tau, b_tau)
+  
+  # Per ora inizializzo tutti i gamma = 0, così da lasciare piena libertà di 
+  #   movimento alla prima iterazione. Poi posso pensare di inizializzare anche
+  #   loro dalla prior.
+  gamma_res[[j]][ , , 1] <- gamma_temp[[j]][ , ] <- 0
+  
   for (t in 1:T_final){
     lab <- rho2lab(rCRP(4, 1))
     labels_temp[[j]][, t] <- labels_res[[j]][, t, 1] <- lab
-    beta_res[[j]][1:max(lab), t, 1] <- rnorm(max(lab),
-                                             mean = theta_res[[j]][t, 1], sd = tau_res[[j]][t, 1])
+    beta_res[[j]][1:max(lab), t, 1] <- beta_temp[[j]][1:max(lab), t] <- 
+      rnorm(max(lab),
+            mean = theta_res[[j]][t, 1], sd = tau_res[[j]][t, 1])
   }
-  
-  # Passo a gamma_res[[j]][ , , d] il gamma_temp che ho inizializzato
-  gamma_res[[j]][ , , 1] <- gamma_temp[[j]]
 }
 
 rm(j); rm(t)
 
 
+
+
+
+### ### ### ### ### ###
+### GIBBS SAMPLING ####
+### ### ### ### ### ###
+# Ipotizzo di volerlo fare per gli uomini
+Y <- data_list_man
 
 f <- function(){
   for (d in 2:n_iter){ # Ciclo sulle iterazioni
@@ -183,6 +221,7 @@ f <- function(){
     
     for (j in 1:p){ # Ciclo sui coefficienti
       for (t in 1:T_final){ # Ciclo sugli istanti
+        
         ### ### ### ### ### ### ####
         ### ### UPDATE GAMMA ### ###
         # Recupero le partizioni al tempo t, t-1 e t+1.
@@ -191,11 +230,11 @@ f <- function(){
         # Se t==1 non mi serve rho_tm1 perché non devo fare il confronto
         #   di compatibilità.
         if (t > 1){
-          rho_tm1 <- lab2rho(labels_res[[j]][, t-1, d])
+          rho_tm1 <- lab2rho(labels_temp[[j]][, t-1])
         }
-        rho_t <- lab2rho(labels_res[[j]][, t, d-1])
+        rho_t <- lab2rho(labels_temp[[j]][, t])
         if (t < T_final){
-          rho_tp1 <- lab2rho(labels_res[[j]][, t+1, d-1])
+          rho_tp1 <- lab2rho(labels_temp[[j]][, t+1])
         }
         
         for (i in 1:n){ # Ciclo sulle osservazioni per gamma
@@ -222,63 +261,41 @@ f <- function(){
         
         ### ### ### ### ### ### ### #
         ### ### UPDATE LABELS ### ###
-        # Per la partizione al tempo t+1 posso usare quella calcolata
-        #   prima dell'aggiornamento dei gamma (tanto si usano quelle
-        #   dell'iterazione d-1).
-        # Per la partizione al tempo t devo creare un oggetto temporaneo 
-        #   perché devo aggiornarla ogni volta che la label di 
-        #   un'osservazione "i" viene aggiornata
-        labels_temp <- labels_res[[j]][,t,d-1]
-        
-        for (i in 1:n){ # Ciclo sulle osservazioni per gamma
-          # Per ogni coefficiente trovo la label a cui è assegnata l'unità i
-          #   al tempo t all'iterazione più recente. Quindi per i coefficienti
-          #   con indice <j possiamo prendere all'iteraz. d perché abbiamo
-          #   già fatto l'update.
-          beta_actual <- rep(0, p)
-          if (j == 1){
-            select <- cbind(1:p, 
-                            vapply(labels_res, function(x) x[i, t, d - 1], integer(1)))
-          } else {
-            select_means1 <- cbind(1:(j-1),
-                                   vapply(labels_res, function(x) x[i, t, d], FUN.VALUE = integer(1))[1:(j-1)])
-            select_means2 <- cbind(j:p, 
-                                   vapply(labels_res, function(x) x[i, t, d - 1], FUN.VALUE = integer(1))[j:p])
-          }
-          
-          
-          #@@@ @@@ @@@ @@@ @@@ @@@ @@@ @@@ @@@ @@@ @@@ @@@ @@@ @@@#
-          #@@@ @@@ @@@ @@@ @@@ @@@ @@@ @@@ @@@ @@@ @@@ @@@ @@@ @@@#
-          ### DEVO CAMPIONARE POSSIBILE NUOVO VALORE PER BETA ###
-          #@@@ @@@ @@@ @@@ @@@ @@@ @@@ @@@ @@@ @@@ @@@ @@@ @@@ @@@#
-          #@@@ @@@ @@@ @@@ @@@ @@@ @@@ @@@ @@@ @@@ @@@ @@@ @@@ @@@#
+        for (i in 1:n){
+          beta_actual <- vapply(1:p, 
+                                function(x) beta_temp[[x]][labels_temp[[x]][i, t], t],
+                                FUN.VALUE = double(1))
           
           
           
-          #@@@ @@@ @@@ @@@ @@@ @@@ @@@ @@@ @@@ @@@ @@@#
-          #@@@ @@@ @@@ @@@ @@@ @@@ @@@ @@@ @@@ @@@ @@@#
-          ### DEVO RISCRIVERE LA FUNZIONE up_label_i ###
-          #@@@ @@@ @@@ @@@ @@@ @@@ @@@ @@@ @@@ @@@ @@@#
-          #@@@ @@@ @@@ @@@ @@@ @@@ @@@ @@@ @@@ @@@ @@@#
-          labels_temp[i] <-  up_label_i(i = i, j = j,
-                                        b_it =  b_res[i, , t, d],
-                                        b_itm1 = if (t > 1) {b_res[i, , t-1, d]} else {rep(0, 3*p)},
-                                        mustarvec_jt = mustar_temp,
-                                        muvec_t = muvec_actual,
-                                        T_ = param_list[[i]]$T[, , 1],
-                                        Q = param_list[[i]]$Q[, , 1],
-                                        rho_t = lab2rho(labels_temp),
-                                        rho_tp1 = rho_tp1,
-                                        gamma_tp1 = if (t == T_final) {'last time'} 
-                                        else {gamma_res[[j]][, t+1, d-1]},
-                                        newclustermean = possiblenewmean)
+          ### ### ### ### ### ### ### ### ### ### ### ###
+          ### Campiono possibile nuovo valore per beta ##
+          ### ### ### ### ### ### ### ### ### ### ### ###
+          newclustervalue <- rnorm(1, theta_temp[[j]][t], tau_temp[[j]][t])
+          
+          ### ### ### ### ####
+          ### UPDATE LABELS ##
+          ### ### ### ### ####
+          # Non assegno qua anche a labels_res perché dovrò prima sistemarlo
+          labels_temp[[j]][i, t] <-  up_label_i(i = i, 
+                                                j = j,
+                                                Y_it = Y[[i]][t, ],
+                                                beta_i = beta_actual,
+                                                beta_cluster = beta_temp[[j]][, t],
+                                                sigma2_i = sigma_temp[i],
+                                                rho_t = lab2rho(labels_temp[[j]][,t]),
+                                                rho_tp1 = lab2rho(labels_temp[[j]][,t]), 
+                                                gamma_tp1 = if (t == T_final) {'last time'} 
+                                                else {gamma_temp[[j]][, t+1]},
+                                                newclustervalue = newclustervalue,
+                                                spline_basis = S)
           
           # Se la label dell'unità i è maggiore di tutte le altre, vuol dire
           #   che è andato in un nuovo cluster e non in uno di quelli esistenti,
-          #   quindi aggiungo la media del nuovo cluster al vettore delle medie
-          #   dei cluster...
-          if (all(labels_temp[i] > labels_temp[-i])){
-            mustar_temp <- append(mustar_temp, possiblenewmean)
+          #   quindi aggiungo il beta del nuovo cluster al vettore dei beta
+          #   dei cluster
+          if (all(labels_temp[[j]][i, t] > labels_temp[[j]][-i, t])){
+            beta_temp[[j]][labels_temp[[j]][i, t], t] <- newclustervalue
           }
           
           
@@ -289,25 +306,33 @@ f <- function(){
           # cat("Prima:", labels_temp, mustar_temp, " ")
           labels_new <- c(1L)
           counter <- 2L
-          for (jj in 2:n){
-            if (!(labels_temp[jj] %in% labels_temp[1:(jj-1)])){
-              labels_new[jj] <- counter
+          for (ii in 2:n){
+            if (!(labels_temp[[j]][ii, t] %in% labels_temp[[j]][1:(ii-1), t])){
+              labels_new[ii] <- counter
               counter <- counter+1
             } else{
-              labels_new[jj] <- labels_new[which(labels_temp == labels_temp[jj])[1]]
+              labels_new[ii] <- labels_new[which(labels_temp[[j]][, t] == labels_temp[[j]][ii, t])[1]]
             }
           }
-          mustar_temp <- mustar_temp[unique(labels_temp)]
-          labels_temp <- labels_new
+          # Voglio riordinare anche beta_temp in accordo con le labels:
+          #   facendo unique(...) ottengo i valori unici delle labels in ordine
+          #   di apparizione nel vettore (e non in ordine cresc./decresc.).
+          #   Questo vettore dà la permutazione necessaria.
+          sort_beta_temp <- unique(labels_temp[[j]][, t])
+          beta_new <- beta_temp[[j]][sort_beta_temp, t]
+          beta_temp[[j]][, t] <- NA
+          beta_temp[[j]][1:length(sort_beta_temp), t] <- beta_new
+          labels_temp[[j]][, t] <- labels_new
           # cat("Dopo:", labels_temp, mustar_temp, "\n")  
           
         } # Fine ciclo sulle osservazioni per labels
         
-        labels_res[[j]][, t, d] <- as.integer(labels_temp)
+        # Forse posso farlo alla fine del ciclo sulle t.
+        labels_res[[j]][, t, d] <- as.integer(labels_temp[[j]][, t])
         
         
         ### ### ### ### ### ### ### #
-        ### ### UPDATE MUSTAR ### ###
+        ### ### UPDATE BETA ### ###
         
         # Devo recuperare le medie dei b_it - T*b_{i t-1}, che dipende dalle
         #   medie dei cluster e anche dalle label per ogni i.
