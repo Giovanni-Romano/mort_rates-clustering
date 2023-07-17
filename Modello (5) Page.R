@@ -136,7 +136,11 @@ phi_res <- delta_res <- array(NA,
                                       )
                               )
 lambda_res <- xi_res <- rep(NA, n_iter)
-
+sigma_res <- array(NA,
+                   dim = c(n, # numero osservazioni
+                           n_iter # numero iterazioni
+                           )
+                   )
 
 
 gamma_temp <- labels_temp <-
@@ -157,13 +161,8 @@ phi_temp <- delta_temp <- array(NA,
                               dim = c(T_final # numero istanti temporali
                                       )
                               )
-
 lambda_temp <- xi_temp <- NA
-sigma_res <- array(NA,
-                   dim = c(n, # numero di osservazioni
-                           ncol = T_final # numero istanti temporali),
-                           )
-                   )
+sigma_temp <- rep(NA, n)
 
 
 
@@ -172,19 +171,19 @@ sigma_res <- array(NA,
 ### ### ### ### ### ###
 sigma_res[, 1] <- sigma_temp <- rinvgamma(n, a_sigma, b_sigma)
   
+xi_res[1] <- xi_temp <- 
+  rinvgamma(1, a_xi, b_xi)
 lambda_res[1] <- lambda_temp <- 
   rnorm(1, mean = m0, sd = sqrt(s02))
-xi_res[1] <- xi_temp <- 
-  rinvgamma(1, a_xi, b_xi) 
 
-phi_res[, 1] <- phi_temp <- 
-  rnorm(T_final, lambda_res[1], xi_res[1])
 delta_res[, 1] <- delta_temp <- 
   rinvgamma(T_final, a_delta, b_delta)
+phi_res[, 1] <- phi_temp <- 
+  rnorm(T_final, lambda_temp, sqrt(xi_temp))
 
 for (j in 1:p){
   theta_res[[j]][ , 1] <- theta_temp[[j]] <- 
-    rnorm(T_final, phi_res[, 1], delta_res[, 1])
+    rnorm(T_final, phi_temp, delta_temp)
   tau_res[[j]][ , 1] <- tau_temp[[j]] <- 
     rinvgamma(T_final, a_tau, b_tau)
   
@@ -198,7 +197,7 @@ for (j in 1:p){
     labels_temp[[j]][, t] <- labels_res[[j]][, t, 1] <- lab
     beta_res[[j]][1:max(lab), t, 1] <- beta_temp[[j]][1:max(lab), t] <- 
       rnorm(max(lab),
-            mean = theta_res[[j]][t, 1], sd = tau_res[[j]][t, 1])
+            mean = theta_temp[[j]][t], sd = tau_temp[[j]][t])
   }
 }
 
@@ -254,8 +253,8 @@ f <- function(){
                                                 rho_tm1 = rho_tm1)
           }
         } # Fine ciclo sulle osservazioni per gamma
-        gamma_res[[j]][, t, d] <- gamma_temp[[j]][, t]
-        # Forse potrei farlo una volta sola, alla fine del ciclo sulle "t".
+        
+        
         
         
         
@@ -273,9 +272,7 @@ f <- function(){
           ### ### ### ### ### ### ### ### ### ### ### ###
           newclustervalue <- rnorm(1, theta_temp[[j]][t], tau_temp[[j]][t])
           
-          ### ### ### ### ####
-          ### UPDATE LABELS ##
-          ### ### ### ### ####
+          
           # Non assegno qua anche a labels_res perché dovrò prima sistemarlo
           labels_temp[[j]][i, t] <-  up_label_i(i = i, 
                                                 j = j,
@@ -311,7 +308,8 @@ f <- function(){
               labels_new[ii] <- counter
               counter <- counter+1
             } else{
-              labels_new[ii] <- labels_new[which(labels_temp[[j]][, t] == labels_temp[[j]][ii, t])[1]]
+              labels_new[ii] <- labels_new[which(labels_temp[[j]][, t] == 
+                                                   labels_temp[[j]][ii, t])[1]]
             }
           }
           # Voglio riordinare anche beta_temp in accordo con le labels:
@@ -327,73 +325,44 @@ f <- function(){
           
         } # Fine ciclo sulle osservazioni per labels
         
-        # Forse posso farlo alla fine del ciclo sulle t.
-        labels_res[[j]][, t, d] <- as.integer(labels_temp[[j]][, t])
         
         
-        ### ### ### ### ### ### ### #
+        
+        
+        ### ### ### ### ### ### ###
         ### ### UPDATE BETA ### ###
+        n_cluster <- max(labels_temp[[j]][ , t])
+          
+        for (k in 1:n_cluster){ # Inizio ciclo sui cluster per i beta
+          beta_temp[[j]][k, t] <- up_beta(j = j, 
+                                          k = k, 
+                                          t = t,
+                                          Y_t = t(vapply(Y, 
+                                                         function(y) y[t, ], 
+                                                         FUN.VALUE = double(101))),
+                                          beta_t =  vapply(beta_temp, 
+                                                           function(b) b[, t], 
+                                                           FUN.VALUE = double(4)),
+                                          theta_jt = theta_temp[[j]][t], 
+                                          tau_jt = tau_temp[[j]][t],
+                                          sigma2_vec = sigma_temp,
+                                          labels_t = vapply(labels_temp, 
+                                                            function(lab) lab[, t], 
+                                                            FUN.VALUE = double(4)),
+                                          spline_basis = S)
+        } # Fine ciclo sui cluster per i beta
         
-        # Devo recuperare le medie dei b_it - T*b_{i t-1}, che dipende dalle
-        #   medie dei cluster e anche dalle label per ogni i.
-        # Devo stare attento a che iterazione considerare per le label: se 
-        #   considero la label nuova (iteraz. d) potrei avere un cluster in
-        #   più dell'iteraz. precedente e quindi non avere la mustar corrispendente.
-        #   Perciò devo usare la label nuova per i coeff. per cui ho già aggiornato
-        #   le mustar dei cluster (perché ho già il valore anche per un eventuale
-        #   nuovo cluster), mentre devo usare le label vecchie per i coeff. per 
-        #   cui non ho ancora aggiornato le mustar dei cluster.
-        #   Perciò devo fare questa selezione all'interno del ciclo su "j" e non
-        #   posso farlo una volta sola fuori dal ciclo.
-        mu_sel <- matrix(0, n, 3*p)
-        for (jj in 1:p){
-          if (jj < j){
-            sel_m <- labels_res[[jj]][, t, d]
-            mu_sel[, 1 + 3*(jj-1)] <- mustar_res[ , , t, d][jj, sel_m]
-          } else if (jj == j){ 
-            # Per il coefficiente j corrente uso gli oggetti temporanei creati
-            #   durante l'aggiornamento delle labels. 
-            #   Per le label potrei anche usare labels_res all'iteraz. d, 
-            #   ma è più facile così.
-            #   Per le medie invece sono obbligato a fare così perché non ho
-            #   aggiornato mustar_res visto che sono in un limbo in cui
-            #   mustar_temp non è nè la versione all'iteraz. d-1 nè quella
-            #   all'iteraz. d.
-            sel_m <- labels_temp
-            mu_sel[, 1 + 3*(jj-1)] <- mustar_temp[sel_m]
-          } else{
-            sel_m <- labels_res[[jj]][, t, d-1]
-            mu_sel[, 1 + 3*(jj-1)] <- mustar_res[ , , t, d-1][jj, sel_m]
-          }
-        }
-        
-        
-        # # Recupero le partizioni al tempo t. Devo aggiornarle rispetto a quelle
-        # #   trovate per aggiornare gamma e labels, perché ora ho la versione 
-        # #   aggiornata delle label all'iterazione d.
-        # rho_t <- lab2rho(labels_res[[j]][, t, d])
-        # n_cluster <- max(labels_res[[j]][, t, d])
-        
-        # La partizione al tempo t aggiornata c'è in labels_temp, quindi posso
-        #   farla più semplice
-        rho_t <- lab2rho(labels_temp)
-        n_cluster <- max(labels_temp)
-        
-        for (k in 1:n_cluster){ # Inizio ciclo sui cluster per mustar
-          mustar_temp[k] <- up_mustar(j = j, k = k, t = t,
-                                      b_t = b_res[, , t, d],
-                                      b_tm1 = b_res[, , t-1, d],
-                                      mu_t = mu_sel,
-                                      T_list = lapply(model_list, function(x) x$fit$T[,,1]),
-                                      Q_list = lapply(model_list, function(x) x$fit$Q[,,1]),
-                                      rho_t = rho_t,
-                                      priorm = m0,
-                                      priorv = v0)
-        } # Fine ciclo sui cluster per mustar
-        
-        mustar_res[j, 1:n_cluster, t, d] <- mustar_temp
         
       } # Fine ciclo sugli istanti "t"
+      
+      # Aggiungo gli elementi anche negli oggetti non-temp
+      labels_res[[j]][ , , d] <- as.integer(labels_temp[[j]])
+      gamma_res[[j]][ , , d] <- gamma_temp[[j]]
+      beta_res[[j]][ , , d] <- beta_temp[[j]]
+      
     } # Fine ciclo sui coefficienti "j"
   } # Fine ciclo sulle iterazioni "d"
 }
+
+debug(up_beta)
+f()

@@ -116,8 +116,11 @@ post_NIG <- function(x, mu0, nu, alpha, beta){
   alpha.post <- alpha + n/2
   beta.post <- beta + 0.5*sum((x-xbar)^2) + (n*nu)/(nu.post) * ((xbar-mu0)^2)/2
   
-  return(c(mu.post, nu.post, alpha.post, beta.post))
+  return(list(norm = c(mu.post, nu.post), InvGa = c(alpha.post, beta.post)))
 }
+
+
+
 
 
 ### ### ### ### ### ##
@@ -191,6 +194,8 @@ up_gamma_i <- function(i, gamma, alpha_t, rho_t, rho_tm1){
 
 
 
+
+
 ### ### ### ### ### ### ### ###
 #### UPDATE CLUSTER LABELS ####
 ### ### ### ### ### ### ### ###
@@ -203,7 +208,7 @@ up_label_i <- function(i, j,
                        newclustervalue,
                        spline_basis) {
   
-  ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ###
+  ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ###
   ### - i: indice dell'unità che stiamo aggiornando
   ### - j: indice del coefficiente che stiamo aggiornando
   ### - Y_it: vettore con Y_{ixt} per ogni x
@@ -251,7 +256,7 @@ up_label_i <- function(i, j,
     } else { # se il cluster è nuovo, devo simulare la media dalla prior
       beta <- newclustervalue
     }
-    # I beta che devo usare sono il vettore beta_j, sostituendo
+    # I beta che devo usare sono il vettore beta_i, sostituendo
     #   per il j-esimo coeff. il beta che ho appena calcolato.
     #
     beta_i[j] <- beta
@@ -305,85 +310,67 @@ up_label_i <- function(i, j,
 
 
 
-#@@@@@@@@@@@@@@@@@@@@@@@#
-#### UPDATE MUSTAR_t ####
-#@@@@@@@@@@@@@@@@@@@@@@@#
-up_mustar <- function(j, k, t,
-                      b_t,  b_tm1,
-                      mu_t, T_list, Q_list,
-                      rho_t,
-                      priorm, priorv){
-  ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ###
+
+
+
+## ### ### ### ### ##
+#### UPDATE BETA ####
+## ### ### ### ### ##
+up_beta <- function(j, k, t,
+                    Y_t,
+                    beta_t,
+                    theta_jt, tau_jt,
+                    sigma2_vec,
+                    labels_t,
+                    spline_basis){
+  ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ###
   ### - j: indice del coefficiente di cui stiamo aggiornando la media
   ### - k: indice del cluster di cui stiamo aggiornando la media
   ### - t: istante temporale attuale
-  ### - b_t: matrice con gli stati latenti al tempo t per tutti i
-  ###         coefficienti e tutte le unità; ogni riga è relativa ad 
-  ###         un'osservazione e ogni colonna ad un coeff.;
-  ###         non basta solo lo stato latente relativo al coefficiente j
-  ###         perché i coefficienti sono correlati
-  ### - b_tm1: come b_t ma al tempo t-1
-  ### - mu_t: matrice delle medie degli errori dello stato latente al tempo t;
-  ###             ogni riga si riferisce un'osservazione e ogni colonna ad un
-  ###             coeff.
-  ###             N.B: i valori che vanno passati dipendono dal valore delle
-  ###                   label al tempo t all'iterazione corrente
-  ### - T_list: lista con le matrici T del sistema di equaz. dello stato latente
-  ### - Q_list: lista con le matrici var-cov degli errori dello stato latente
-  ### - rho_t: partizione al tempo t PER IL COEFF j
-  ### - priorm: media a priori per la mu dei cluster
-  ### - priorv: varianza a priori per la mu dei cluster
+  ### - Y_t: matrix with Y_{ixt} for all obs. i and all obs. x
+  ### - beta_t: matrice con i beta per tutti i cluster per tutti i coeff. 
+  ###           al tempo t
+  ### - theta_jt, tau_jt: media e varianza della prior dei beta
+  ### - sigma2_vec: vettore con le varianze delle osservazioni
+  ### - labels_t: matrice delle label al tempo t per tutti i coeff.
+  ### - spline_basis: matrice con i valori delle basi spline
   
-  # Devo trovare quali elementi di b_jt appartengono al cluster k e poi uso
-  #   classica conjugacy Gauss-Gauss.
-  obs <- rho_t[[k]]
+  # Devo trovare quali osservazioni appartengono al cluster k per il 
+  #   e coeff. j e poi uso conjugacy Gauss-Gauss.
+  obs <- lab2rho(labels_t[ , j])[[k]]
   
-  # Lavoro su b_it - T*b_itm1, così che mustar sia proprio la media di questa
-  #   nuova variabile. Inoltre tengo solo le osservazioni che servono.
-  b.tilde <- c()
-  if (t == 1){
-    b.tilde <- b_t[obs, ]
-  } else{
-    for (i in obs){
-      b.tilde <- rbind(b.tilde, t(b_t[i, ] - T_list[[i]] %*% b_tm1[i, ]))
-    }
-    # Se b.tilde ha una riga sola, lo trasformo in vettore; se ha più di 
-    #   una riga, non succede niente.
-    b.tilde <- drop(b.tilde)
-  }
   
-  mu <- mu_t[obs, ]
-  # Se mu ha una riga sola, lo trasformo in vettore; se ha più di 
+  # Lavoro su \tilde{Y}_ixt, cioè le osservazioni Y_{ixt} meno le spline tranne
+  #   la j-esima, così che beta_jkt*g_j(x) sia la media di questa
+  #   nuova variabile. Inoltre tengo solo le osservazioni che servono, cioè 
+  #   quelle che per il coefficiente j appartengono al cluster k
+  
+  # Devo recuperare i beta giusti per ogni osservazione per ogni coeff. != j
+  p <- ncol(spline_basis)
+  beta_actual <- vapply(1:p, 
+                        function(x) beta_t[labels_t[ , x], x],
+                        FUN.VALUE = double(4))[obs, -j] # tolgo la j-esima colonna
+                                                        # e le oss. non nel cluster
+  # Costruisco effettivamente \tilde{Y}_t
+  Y_t.tilde <- Y_t[obs, ] - beta_actual %*% t(spline_basis[ , -j])
+  # Se Y_t.tilde ha una riga sola, lo trasformo in vettore; se ha più di 
   #   una riga, non succede niente.
-  mu <- drop(mu)
+  Y_t.tilde <- drop(Y_t.tilde)
   
-  # Devo togliere le Q delle osservazioni che non usiamo
-  Q_list.new <- list()
-  for (iii in obs){
-    Q_list.new[[length(Q_list.new) + 1]] <- Q_list[[iii]]
-  }
   
-  n_k <- length(Q_list.new)
-  p <- nrow(Q_list.new[[1]])
-  if (n_k > 1){
-    list_cond <- lapply(1:n_k, 
-                        function(x) condMVN(mu[x, ], Q_list.new[[x]], j, 
-                                            (1:p)[-j], b.tilde[x, -j]))
-    
-    cvar <- vapply(list_cond, function(x) x$condVar, FUN.VALUE = double(1))
-    cmean <- vapply(list_cond, function(x) x$condMean, FUN.VALUE = double(1))
-    
-    post.var <- 1 / (1/priorv + sum(1/cvar))
-    post.mean <- post.var * (priorm/priorv + sum(b.tilde[,j]/cvar))
-  } else {
-    list_cond <- condMVN(mu, Q_list.new[[1]], j, (1:p)[-j], b.tilde[-j])
-    
-    cvar <- list_cond$condVar
-    cmean <- list_cond$condMean
-    
-    post.var <- 1 / (1/priorv + sum(1/cvar))
-    post.mean <- post.var * (priorm/priorv + b.tilde[j]/cvar)
-  }
+  # Devo togliere le sigma2_i delle osservazioni che non usiamo
+  sigma2_vec <- sigma2_vec[obs]
   
-  rnorm(1, mean = post.mean, sd = sqrt(post.var))
+  
+  # Varianza a posteriori
+  var.post <- 1 / tau_jt + sum(1/sigma2_vec)*sum(spline_basis[j, ]^2)
+  # Media a posteriori
+  mean.post <- (1 / var.post) * 
+    ( sum( t(t(Y_t.tilde)*spline_basis[ , j])/sigma2_vec ) + 
+        theta_jt / tau_jt )
+  # Devo fare il doppio trasposto per sfruttare bene il prodotto element-wise
+  
+  beta_updated <- rnorm(1, mean = mean.post, sd = sqrt(var.post))
+  
+  return(beta_updated)
 }
