@@ -101,28 +101,6 @@ are.partitions.equal <- function(part1, part2){
 
 
 
-### ### ### ### ### ### ### ### #
-#### CONJUGACY NORM-INVGAMMA ####
-### ### ### ### ### ### ### ### #
-post_NIG <- function(x, mu0, nu, alpha, beta){
-  # Uso la notazione di wikipedia (https://en.wikipedia.org/wiki/Conjugate_prior)
-  
-  n <- length(x)
-  xbar <- mean(x)
-  
-  nu.post <- nu + n
-  mu.post <- (nu*mu0 + n*xbar) / nu.post
-  
-  alpha.post <- alpha + n/2
-  beta.post <- beta + 0.5*sum((x-xbar)^2) + (n*nu)/(nu.post) * ((xbar-mu0)^2)/2
-  
-  return(list(norm = c(mu.post, nu.post), InvGa = c(alpha.post, beta.post)))
-}
-
-
-
-
-
 ### ### ### ### ### ##
 #### UPDATE GAMMA ####
 ### ### ### ### ### ##
