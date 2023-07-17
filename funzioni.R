@@ -352,3 +352,54 @@ up_beta <- function(j, k, t,
   
   return(beta_updated)
 }
+
+
+
+
+
+## ### ### ### ### #
+#### UPDATE TAU ####
+## ### ### ### ### #
+up_tau <- function(tau_now,
+                   epsilon,
+                   beta_t,
+                   theta_t,
+                   A_tau){
+  ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ###
+  ### - tau_now: vector w/ current values of tau_jt for all j
+  ### - eps: RW step size
+  ### - beta_t: n*p matrix of beta_{kjt} for all clusters k and for all coeff. j
+  ### - theta_t: p-vector of theta_{jt} for all coeff.'s j
+  ### - A_tau: hyperparam of prior on tau's
+  
+  # Sample proposed value
+  tau_prop <- runif(ncol(beta_t), tau_now - eps, tau_now + eps)
+  
+  
+  # Vector with prob's of acceptance
+  
+  # Indicator to check if proposed values are in the domain
+  indicator <- log(as.integer(tau_prop > 0 & tau_prop < A_tau))
+  
+  # Likelihood of current value and proposed one
+  #   I have to transpose beta_t because R fills matrices by columns and beta_t
+  #   is n*p and theta_t is p*1.
+  likel_now <- rowSums(dnorm(t(beta_t), 
+                             mean = theta_t, 
+                             sd = sqrt(tau_now),
+                             log = TRUE),
+                       na.rm = TRUE) 
+  likel_prop <- rowSums(dnorm(t(beta_t), 
+                              mean = theta_t,
+                              sd = sqrt(tau_prop),
+                              log = TRUE),
+                        na.rm = TRUE)
+  logprob <- indicator + likel_now - likel_prop
+  
+  # Create output
+  out <- tau_now
+  # If prob. of accept. is >= than 1 (so log>=0), accept proposed value
+  out[logprob >= 0] <- tau_prop[logprob >= 0]
+  
+  return(out)
+}
