@@ -92,6 +92,13 @@ M <- 1
 
 # Numero iterazioni
 n_iter <- 10
+# RW step sizes
+#   I've done some diagnostics and it seems that the best thing to do is to 
+#   to pick a large stepsize, so I set it equal to the size of the domain
+eps_tau <- A_tau
+eps_delta <- A_delta
+eps_xi <- A_xi
+eps_sigma <- A_sigma
 
 
 
@@ -355,7 +362,13 @@ f <- function(){
                                           phi_j = phi_temp[[j]],
                                           delta_j = delta_temp[[j]])
         
-        
+        ### ### ### ### ###
+        ### UPDATE TAU ###
+        tau_temp[[j]][t] <- up_var.RWM(val_now = tau_temp[[j]][t],
+                                       eps = eps_tau,
+                                       data = beta_temp[[j]][, t],
+                                       mean = theta_temp[[j]][t],
+                                       hyppar = A_tau)
       } # Fine ciclo sugli istanti "t"
       
       # Aggiungo gli elementi anche negli oggetti non-temp
