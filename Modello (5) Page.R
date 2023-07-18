@@ -75,18 +75,10 @@ p <- ncol(S)
 alpha <- 0.5
 # Iperparametri della prior dell'ultimo layer
 m0 <- 0; s02 <- 100 
-# Iperparametri Inverse-Gamma
-#   Nel paper di Page le prior sulle varianze sono Uniformi tra 0 e 5 o 10;
-#     impostando i seguenti iperparametri ottengo una prior molto piatta, con 
-#     peak tra 0 e 20: la moda è in ~5 e la varianza è "infinita" (l'InvGamma
-#     ha varianza indefinita per alfa <= 2).
-a_tau <- a_delta <- a_xi <- 1
-b_tau <- b_delta <- b_xi <- 5
-# Varianza delle osservazioni: metto una prior comune alle sigma2_i.
-a_sigma <- 1
-b_sigma <- 5
-#   Uso una InvGamma con gli stessi parametri di sopra.
-
+# Uniforms' hyperparameters
+#   Following Page's idea in paragraph 2.5 I choose these hyperparams
+A_sigma <- 5
+A_tau <- A_delta <- A_xi <- 10
 # Parametro di concentrazione del CRP
 M <- 1
 
