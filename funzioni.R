@@ -390,7 +390,7 @@ up_theta_jt <- function(beta_jt,
   ### - beta_jt: vector of beta_kjt for all clusters k
   ### - the other parameters' names are clear
   
-  x <- beta_jt(!is.na(beta_jt))
+  x <- beta_jt[!is.na(beta_jt)]
   xbar <- mean(x)
   n <- length(xbar)
   
@@ -404,6 +404,67 @@ up_theta_jt <- function(beta_jt,
   
   return(out)
 }
+
+
+
+
+
+### ### #### ### ### 
+#### UPDATE PHI ####
+### ### #### ### ### 
+up_phi_j <- function(theta_j,
+                     delta_j,
+                     lambda,
+                     xi){
+  ### ### ### ### ### ### ### ### ### ### ### ### ### ###
+  ### - theta_j: vector with theta_jt for all t
+  ### - the other parameters' names are clear
+  
+  x <- theta_j
+  xbar <- mean(x)
+  n <- length(xbar)
+  
+  postpar <- GaussGaussUpdate_iid(xbar = xbar,
+                                  n = n,
+                                  datavar = delta_j,
+                                  priormean = lambda,
+                                  priorvar = xi)
+  
+  out <- rnorm(1, postpar[1], sqrt(postpar[2]))
+  
+  return(out)
+}
+
+
+
+
+
+### ### #### ### ### ## 
+#### UPDATE LAMBDA ####
+### ### #### ### ### ##
+up_lambda <- function(phi,
+                     xi,
+                     m0,
+                     s02){
+  ### ### ### ### ### ### ### ### ### ### ### ### ### ###
+  ### - phi: vector with phi_j for all j
+  ### - the other parameters' names are clear
+  
+  x <- phi
+  xbar <- mean(x)
+  n <- length(xbar)
+  
+  postpar <- GaussGaussUpdate_iid(xbar = xbar,
+                                  n = n,
+                                  datavar = xi,
+                                  priormean = m0,
+                                  priorvar = s02)
+  
+  out <- rnorm(1, postpar[1], sqrt(postpar[2]))
+  
+  return(out)
+}
+
 
 
 
