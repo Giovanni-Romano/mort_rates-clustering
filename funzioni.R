@@ -357,6 +357,55 @@ up_beta <- function(j, k, t,
 
 
 
+### ### ### ### ### ### ### ### ##
+#### GAUSS-GAUSS CONJ. UPDATE ####
+### ### ### ### ### ### ### ### ##
+GaussGaussUpdate_iid <- function (xbar, n, datavar, priormean, priorvar) 
+{
+  ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ###
+  ### - xbar: sample mean of data
+  ### - datavar: theoretical variance of the distribution of the data
+  ### - priormean: mean of the Gaussian prior
+  ### - priorvar: variance of the Gaussian prior
+  
+  postvar <- (n/datavar + 1/priorvar)^(-1)
+  postmean <- postvar * (n * xbar/datavar + priormean/priorvar)
+  
+  res <- c(postmean = postmean, postvar = postvar)
+  return(res)
+}
+
+
+
+
+
+### ### ### ### ### ##
+#### UPDATE THETA ####
+### ### ### ### ### ##
+up_theta_jt <- function(beta_jt,
+                        tau_jt,
+                        phi_j,
+                        delta_j){
+  ### ### ### ### ### ### ### ### ### ### ### ### ### ###
+  ### - beta_jt: vector of beta_kjt for all clusters k
+  ### - the other parameters' names are clear
+  
+  x <- beta_jt(!is.na(beta_jt))
+  xbar <- mean(x)
+  n <- length(xbar)
+  
+  postpar <- GaussGaussUpdate_iid(xbar = xbar,
+                                  n = n,
+                                  datavar = tau_jt,
+                                  priormean = phi_j,
+                                  priorvar = delta_j)
+  
+  rnorm(1, postpar[1], sqrt(postpar[2]))
+}
+
+
+
+
 # ## ### ### ### ### #
 # #### UPDATE TAU ####
 # ## ### ### ### ### #
