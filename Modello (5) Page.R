@@ -122,12 +122,16 @@ theta_res <- tau_res <- replicate(p,
                                         )
                                   ),
                                   simplify = FALSE)
-phi_res <- delta_res <- array(NA,
-                              dim = c(T_final, # numero istanti temporali
-                                      n_iter # numero iterazioni
-                                      )
-                              )
+
+phi_res <- delta_res <- replicate(p,
+                                  array(NA,
+                                        dim = c(n_iter # numero iterazioni
+                                        )
+                                  ),
+                                  simplify = FALSE)
+
 lambda_res <- xi_res <- rep(NA, n_iter)
+
 sigma_res <- array(NA,
                    dim = c(n, # numero osservazioni
                            n_iter # numero iterazioni
@@ -135,6 +139,7 @@ sigma_res <- array(NA,
                    )
 
 
+# Temp objects
 gamma_temp <- labels_temp <-
   beta_temp <- replicate(p,
                          array(NA,
@@ -143,16 +148,15 @@ gamma_temp <- labels_temp <-
                                         )
                          ),
                          simplify = FALSE)
+
 theta_temp <- tau_temp <- replicate(p,
                                   array(NA,
                                         dim = c(T_final # numero istanti temporali
                                                 )
                                         ),
                                   simplify = FALSE)
-phi_temp <- delta_temp <- array(NA,
-                              dim = c(T_final # numero istanti temporali
-                                      )
-                              )
+
+phi_temp <- delta_temp <- replicate(p, list(NA))
 lambda_temp <- xi_temp <- NA
 sigma_temp <- rep(NA, n)
 
@@ -161,23 +165,23 @@ sigma_temp <- rep(NA, n)
 ### ### ### ### ### ###
 ### Inizializzazioni ##
 ### ### ### ### ### ###
-sigma_res[, 1] <- sigma_temp <- rinvgamma(n, a_sigma, b_sigma)
+sigma_res[, 1] <- sigma_temp <- runif(n, 0, A_sigma)
   
 xi_res[1] <- xi_temp <- 
-  rinvgamma(1, a_xi, b_xi)
+  runif(1, 0, A_xi)
 lambda_res[1] <- lambda_temp <- 
   rnorm(1, mean = m0, sd = sqrt(s02))
 
-delta_res[, 1] <- delta_temp <- 
-  rinvgamma(T_final, a_delta, b_delta)
-phi_res[, 1] <- phi_temp <- 
-  rnorm(T_final, lambda_temp, sqrt(xi_temp))
-
 for (j in 1:p){
+  delta_res[[j]][1] <- delta_temp[[j]] <- 
+    runif(1, 0, A_delta)
+  phi_res[[j]][1] <- phi_temp[[j]] <- 
+    rnorm(p, lambda_temp, sqrt(xi_temp))
+  
   theta_res[[j]][ , 1] <- theta_temp[[j]] <- 
-    rnorm(T_final, phi_temp, delta_temp)
+    rnorm(T_final, phi_temp[[j]], delta_temp[[j]])
   tau_res[[j]][ , 1] <- tau_temp[[j]] <- 
-    rinvgamma(T_final, a_tau, b_tau)
+    runif(T_final, 0, A_tau)
   
   # Per ora inizializzo tutti i gamma = 0, così da lasciare piena libertà di 
   #   movimento alla prima iterazione. Poi posso pensare di inizializzare anche
@@ -344,6 +348,13 @@ f <- function(){
                                           spline_basis = S)
         } # Fine ciclo sui cluster per i beta
         
+        ### ### ### ### ### 
+        ### UPDATE THETA ###
+        theta_temp[[j]][t] <- up_theta_jt(beta_jt = beta_temp[[j]][, t],
+                                          tau_jt = tau_temp[[j]][t],
+                                          phi_j = phi_temp[[j]],
+                                          delta_j = delta_temp[[j]])
+        
         
       } # Fine ciclo sugli istanti "t"
       
@@ -351,6 +362,8 @@ f <- function(){
       labels_res[[j]][ , , d] <- as.integer(labels_temp[[j]])
       gamma_res[[j]][ , , d] <- gamma_temp[[j]]
       beta_res[[j]][ , , d] <- beta_temp[[j]]
+      theta_res[[j]][ , d] <- theta_temp[[j]]
+      
       
     } # Fine ciclo sui coefficienti "j"
   } # Fine ciclo sulle iterazioni "d"
