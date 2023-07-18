@@ -400,7 +400,9 @@ up_theta_jt <- function(beta_jt,
                                   priormean = phi_j,
                                   priorvar = delta_j)
   
-  rnorm(1, postpar[1], sqrt(postpar[2]))
+  out <- rnorm(1, postpar[1], sqrt(postpar[2]))
+  
+  return(out)
 }
 
 
@@ -483,23 +485,28 @@ up_var.RWM <- function(val_now,
   # Vector with prob's of acceptance
   
   # Indicator to check if proposed values are in the domain
-  indicator <- log(as.integer(val_prop > 0 & val_prop < hyppar))
+  indicator <- (val_prop > 0 & val_prop < hyppar)
   
-  # Likelihood of current value and proposed one
-  likel_now <- sum(dnorm(data, 
-                         mean = mean, 
-                         sd = sqrt(val_now),
-                         log = TRUE),
-                   na.rm = TRUE) 
-  likel_prop <- sum(dnorm(data, 
-                          mean = mean,
-                          sd = sqrt(val_prop),
-                          log = TRUE),
-                    na.rm = TRUE)
-  logprob <- indicator + likel_now - likel_prop
+  if (indicator){
+    # Likelihood of current value and proposed one
+    likel_now <- sum(dnorm(data, 
+                           mean = mean, 
+                           sd = sqrt(val_now),
+                           log = TRUE),
+                     na.rm = TRUE) 
+    likel_prop <- sum(dnorm(data, 
+                            mean = mean,
+                            sd = sqrt(val_prop),
+                            log = TRUE),
+                      na.rm = TRUE)
+    logprob <- indicator + likel_prop - likel_now
+  } else {
+    logprob <- -Inf
+  }
   
   # Create output
-  out <- ifelse(logprob >= 0, val_prop, val_now)
+  acc <- (log(runif(1, 0, 1)) < logprob) 
+  out <- ifelse(acc, val_prop, val_now)
   
   return(out)
 }
