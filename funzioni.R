@@ -571,3 +571,21 @@ up_var.RWM <- function(val_now,
   
   return(out)
 }
+
+
+
+
+
+### ### ### ### ### ##
+#### UPDATE ALPHA ####
+### ### ### ### ### ##
+up_alpha_j <- function(sum_data,
+                       n,
+                       priorshape1,
+                       priorshape2){
+  out <- rbeta(1, 
+               priorshape1 + sum_data, 
+               priorshape2 + n - sum_data)
+  
+  return(out)
+}
