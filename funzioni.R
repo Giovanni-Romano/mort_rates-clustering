@@ -341,9 +341,9 @@ up_beta <- function(j, k, t,
   
   
   # Varianza a posteriori
-  var.post <- 1 / tau_jt + sum(1/sigma2_vec)*sum(spline_basis[j, ]^2)
+  var.post <- ( 1 / tau_jt + sum(1/sigma2_vec)*sum(spline_basis[, j]^2) )^(-1)
   # Media a posteriori
-  mean.post <- (1 / var.post) * 
+  mean.post <- var.post * 
     ( sum( t(t(Y_t.tilde)*spline_basis[ , j])/sigma2_vec ) + 
         theta_jt / tau_jt )
   # Devo fare il doppio trasposto per sfruttare bene il prodotto element-wise
@@ -392,7 +392,7 @@ up_theta_jt <- function(beta_jt,
   
   x <- beta_jt[!is.na(beta_jt)]
   xbar <- mean(x)
-  n <- length(xbar)
+  n <- length(x)
   
   postpar <- GaussGaussUpdate_iid(xbar = xbar,
                                   n = n,
@@ -422,7 +422,7 @@ up_phi_j <- function(theta_j,
   
   x <- theta_j
   xbar <- mean(x)
-  n <- length(xbar)
+  n <- length(x)
   
   postpar <- GaussGaussUpdate_iid(xbar = xbar,
                                   n = n,
@@ -452,7 +452,7 @@ up_lambda <- function(phi,
   
   x <- phi
   xbar <- mean(x)
-  n <- length(xbar)
+  n <- length(x)
   
   postpar <- GaussGaussUpdate_iid(xbar = xbar,
                                   n = n,
