@@ -9,15 +9,15 @@ load("C:/Users/RomanoGi/Desktop/Bocconi/Ricerca/BSP_Pavone/output/mortality.Rdat
 load("fit_indep.Rdata")
 source("funzioni.R")
 
-data_list_man <- list(ita_man = Y_ita_man / N_ita_man,
-                      swe_man = Y_swe_man / N_swe_man,
-                      uk_man = Y_uk_man / N_uk_man,
-                      us_man = Y_us_man / N_us_man)
+data_list_man <- list(ita_man = log(Y_ita_man / N_ita_man),
+                      swe_man = log(Y_swe_man / N_swe_man),
+                      uk_man = log(Y_uk_man / N_uk_man),
+                      us_man = log(Y_us_man / N_us_man))
 
-data_list_woman <- list(ita_woman = Y_ita_woman / N_ita_woman,
-                        swe_woman = Y_swe_woman / N_swe_woman,
-                        uk_woman = Y_uk_woman / N_uk_woman,
-                        us_woman = Y_us_woman / N_us_woman)
+data_list_woman <- list(ita_woman = log(Y_ita_woman / N_ita_woman),
+                        swe_woman = log(Y_swe_woman / N_swe_woman),
+                        uk_woman = log(Y_uk_woman / N_uk_woman),
+                        us_woman = log(Y_us_woman / N_us_woman))
 
 set.seed(4238)
 
@@ -71,16 +71,16 @@ T_final
 n <- length(data_list_man); n
 # Dimensione stato latente (-> numero coeff)
 p <- ncol(S)
-# Parametro Bernoulli per i gamma
-alpha <- 0.5
 # Iperparametri della prior dell'ultimo layer
-m0 <- 0; s02 <- 100 
+m0 <- 0; s02 <- 1 
 # Uniforms' hyperparameters
 #   Following Page's idea in paragraph 2.5 I choose these hyperparams
 A_sigma <- 5
 A_tau <- A_delta <- A_xi <- 10
+# Hyperparams for the Beta prior on alpha
+a_alpha <- b_alpha <- 1
 # Parametro di concentrazione del CRP
-M <- 1
+M <- 2
 
 
 
@@ -91,7 +91,7 @@ M <- 1
 ### ### ### ### ### ### ### ### ### ###
 
 # Numero iterazioni
-n_iter <- 10
+n_iter <- 2000
 # RW step sizes
 #   I've done some diagnostics and it seems that the best thing to do is to 
 #   to pick a large stepsize, so I set it equal to the size of the domain
@@ -112,15 +112,23 @@ eps_sigma <- A_sigma
 # Ho provato ad inizializzare questi oggetti con 99999 sperando di velocizzare,
 #   ma non cambia niente. Perciò, preferisco tenere NA, almeno se qualcosa va
 #   storto me ne accorgo.
-gamma_res <- labels_res <- 
-  beta_res <- replicate(p,
-                        array(NA,
-                              dim = c(n, # numero di osservazioni
-                                      T_final, # numero istanti temporali
-                                      n_iter # numero iterazioni
-                              )
-                        ),
-                        simplify = FALSE)
+gamma_res <- labels_res <- replicate(p,
+                                     array(NA,
+                                           dim = c(n, # numero di osservazioni
+                                                   T_final, # numero istanti temporali
+                                                   n_iter # numero iterazioni
+                                           )
+                                     ),
+                                     simplify = FALSE)
+
+beta_res <- replicate(p,
+                      array(NA,
+                            dim = c(n, # numero di osservazioni
+                                    T_final, # numero istanti temporali
+                                    n_iter # numero iterazioni
+                            )
+                      ),
+                      simplify = FALSE)
 
 theta_res <- tau_res <- replicate(p,
                                   array(NA,
@@ -136,6 +144,13 @@ phi_res <- delta_res <- replicate(p,
                                         )
                                   ),
                                   simplify = FALSE)
+
+alpha_res <- replicate(p,
+                       array(NA,
+                             dim = c(n_iter # numero iterazioni
+                             )
+                       ),
+                       simplify = FALSE)
 
 lambda_res <- xi_res <- rep(NA, n_iter)
 
@@ -164,6 +179,7 @@ theta_temp <- tau_temp <- replicate(p,
                                   simplify = FALSE)
 
 phi_temp <- delta_temp <- replicate(p, list(NA))
+alpha_temp <- replicate(p, list(NA))
 lambda_temp <- xi_temp <- NA
 sigma_temp <- rep(NA, n)
 
@@ -185,10 +201,13 @@ for (j in 1:p){
   phi_res[[j]][1] <- phi_temp[[j]] <- 
     rnorm(1, lambda_temp, sqrt(xi_temp))
   
+  alpha_res[[j]][1] <- alpha_temp[[j]] <- rbeta(1, a_alpha, b_alpha)
+  
   theta_res[[j]][ , 1] <- theta_temp[[j]] <- 
     rnorm(T_final, phi_temp[[j]], delta_temp[[j]])
   tau_res[[j]][ , 1] <- tau_temp[[j]] <- 
     runif(T_final, 0, A_tau)
+  
   
   # Per ora inizializzo tutti i gamma = 0, così da lasciare piena libertà di 
   #   movimento alla prima iterazione. Poi posso pensare di inizializzare anche
@@ -207,7 +226,7 @@ for (j in 1:p){
 rm(j); rm(t)
 
 
-
+inizio <- Sys.time()
 
 
 ### ### ### ### ### ###
@@ -216,13 +235,13 @@ rm(j); rm(t)
 # Ipotizzo di volerlo fare per gli uomini
 Y <- data_list_man
 
+
 for (d in 2:n_iter){ # Ciclo sulle iterazioni
   
-  if ((d %% 100) == 0) {cat(d, "\n")}
+  if ((d %% 50) == 0) {cat(d, "\n")}
   
   for (j in 1:p){ # Ciclo sui coefficienti
     for (t in 1:T_final){ # Ciclo sugli istanti
-      
       ### ### ### ### ### ### ####
       ### ### UPDATE GAMMA ### ###
       # Recupero le partizioni al tempo t, t-1 e t+1.
@@ -250,7 +269,7 @@ for (d in 2:n_iter){ # Ciclo sulle iterazioni
           # Assegno la nuova gamma nel tmp
           gamma_temp[[j]][i, t] <- up_gamma_i(i = i, 
                                               gamma = gamma_temp[[j]][, t], 
-                                              alpha_t = alpha,
+                                              alpha_t = alpha_temp[[j]],
                                               rho_t = rho_t,
                                               rho_tm1 = rho_tm1)
         }
@@ -286,20 +305,10 @@ for (d in 2:n_iter){ # Ciclo sulle iterazioni
                                               newclustervalue = newclustervalue,
                                               spline_basis = S)
         
-        # Se la label dell'unità i è maggiore di tutte le altre, vuol dire
-        #   che è andato in un nuovo cluster e non in uno di quelli esistenti,
-        #   quindi aggiungo il beta del nuovo cluster al vettore dei beta
-        #   dei cluster
-        if (all(labels_temp[[j]][i, t] > labels_temp[[j]][-i, t])){
-          beta_temp[[j]][labels_temp[[j]][i, t], t] <- newclustervalue
-        }
-        
         
         # Sistemo le labels in modo tale che non ci siano buchi (tipo non 
         # voglio c(1, 2, 2, 4) ma c(1, 2, 2, 4)) e che siano ordinate
         # (tipo non voglio c(2, 1, 2, 3) ma c(1, 2, 1, 3)).
-        
-        # cat("Prima:", labels_temp, mustar_temp, " ")
         labels_new <- c(1L)
         counter <- 2L
         for (ii in 2:n){
@@ -311,16 +320,38 @@ for (d in 2:n_iter){ # Ciclo sulle iterazioni
                                                  labels_temp[[j]][ii, t])[1]]
           }
         }
+        
         # Voglio riordinare anche beta_temp in accordo con le labels:
         #   facendo unique(...) ottengo i valori unici delle labels in ordine
         #   di apparizione nel vettore (e non in ordine cresc./decresc.).
         #   Questo vettore dà la permutazione necessaria.
-        sort_beta_temp <- unique(labels_temp[[j]][, t])
-        beta_new <- beta_temp[[j]][sort_beta_temp, t]
+        
+        if (all(labels_temp[[j]][i, t] > labels_temp[[j]][-i, t])){
+          # Se la label dell'unità i è maggiore di tutte le altre, vuol dire
+          #   che è andato in un nuovo cluster e non in uno di quelli esistenti,
+          #   quindi aggiungo il beta del nuovo cluster al vettore dei beta
+          #   dei cluster.
+          if (labels_temp[[j]][i, t] > n){
+            # If the new cluster is the (n+1)st, then I cannot modify directly
+            #   beta_temp because I would exceed its size.
+            beta_extended <- c(beta_temp[[j]][, t], newclustervalue)
+            sort_beta_temp <- unique(labels_temp[[j]][, t])
+            beta_new <- beta_extended[sort_beta_temp]
+          } else { # If new cluster is <= n
+            beta_temp[[j]][labels_temp[[j]][i, t], t] <- newclustervalue
+            sort_beta_temp <- unique(labels_temp[[j]][, t])
+            beta_new <- beta_temp[[j]][sort_beta_temp, t]
+          }
+        } else { # If not new cluster
+          sort_beta_temp <- unique(labels_temp[[j]][, t])
+          beta_new <- beta_temp[[j]][sort_beta_temp, t]
+        }
+        
         beta_temp[[j]][, t] <- NA
         beta_temp[[j]][1:length(sort_beta_temp), t] <- beta_new
+        
+        # Finally, I assign the new fixed label to the storing object
         labels_temp[[j]][, t] <- labels_new
-        # cat("Dopo:", labels_temp, mustar_temp, "\n")  
         
       } # Fine ciclo sulle osservazioni per labels
       
@@ -396,6 +427,14 @@ for (d in 2:n_iter){ # Ciclo sulle iterazioni
                  data = theta_temp[[j]],
                  mean = phi_temp[[j]],
                  hyppar = A_delta)
+    
+    ### ### ### ### ####
+    ### UPDATE ALPHA ###
+    alpha_res[[j]][d] <- alpha_temp[[j]] <-
+      up_alpha_j(sum(gamma_temp[[j]]),
+                 n * T_final,
+                 a_alpha,
+                 b_alpha)
   } # END OF FOR LOOP OVER COEFFICIENTS "j"
   
   ### ### ### ### ### #
@@ -403,7 +442,7 @@ for (d in 2:n_iter){ # Ciclo sulle iterazioni
   lambda_res[d] <- lambda_temp <- 
     up_lambda(phi = unlist(phi_temp),
               xi = xi_temp,
-              m0 = mo,
+              m0 = m0,
               s02 = s02)
   
   
@@ -418,3 +457,10 @@ for (d in 2:n_iter){ # Ciclo sulle iterazioni
   
   
 } # END OF FOR LOOP OVER ITERATIONS "d"
+
+
+fine <- Sys.time()
+
+fine - inizio
+
+# save.image("C:/Users/RomanoGi/Desktop/Bocconi/Ricerca/mort_rates-clustering/1st_sim_data.RData")
