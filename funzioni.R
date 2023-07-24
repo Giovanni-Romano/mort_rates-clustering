@@ -38,6 +38,12 @@ dCRP <- function(size, M){
   # size è il vettore con le cluster size e M è il parametro di concentrazione
   size <- size[size>0]
   M^NROW(size) * prod(factorial(size - 1)) / pochhammer(M, sum(size))
+  
+  
+  # Unit: microseconds
+  # expr        min    lq     mean      median    uq      max       neval
+  # my.func     3.4   3.601   3.985279  3.701     3.802   61.400    1000
+  # nimble      7.0   7.301   8.135255  7.401     7.601   206.801   1000
 }
 
 rCRP <- function(n, M){
@@ -88,6 +94,12 @@ are.partitions.equal <- function(part1, part2){
   ### POSSIBILE ALTERNATIVA --> CONTROLLARE!!!  ###
   ### SE FA LA COSA GIUSTA, E' MOLTO PIU' VELOCE ##
   ### ### ### ### ### ### ### ### ### ### ### ### #
+  
+  # Unit: microseconds (1e-6 seconds)
+  # expr    min     lq      mean median      uq      max neval
+  # old 87.600 90.301 109.87789 92.601 100.801 9225.001 10000
+  # new 47.702 49.301  59.84257 50.301  54.201 7147.502 10000
+  
   check <- all(
     vapply(part1, 
            function(x) any(vapply(part2, function(y) setequal(x, y), FALSE)),
