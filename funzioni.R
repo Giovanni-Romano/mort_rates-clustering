@@ -116,7 +116,7 @@ are.partitions.equal <- function(part1, part2){
 ### ### ### ### ### ##
 #### UPDATE GAMMA ####
 ### ### ### ### ### ##
-up_gamma_i <- function(i, gamma, alpha_t, rho_t, rho_tm1){
+up_gamma_i <- function(i, gamma, alpha_t, lab_t, lab_tm1){
   
   ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ###
   ### - gamma è il vettore gamma_{t} più recente, quindi alcune componenti
@@ -131,47 +131,32 @@ up_gamma_i <- function(i, gamma, alpha_t, rho_t, rho_tm1){
   R_tpi <- c(R_tmi, i)
   
   # uso il ".R" per indicare le partizioni ridotte
-  rho_tm1.R <- list()
-  rho_t.R <- list()
+  lab_tm1.R <- rep(-1, length(lab_t))
+  lab_tm1.R[R_tpi] <- lab_tm1[R_tpi]
+  lab_t.R <- rep(-1, length(lab_t))
+  lab_t.R[R_tpi] <- lab_t[R_tpi]
   
-  for (j in 1:length(rho_tm1)){
-    if (sum(rho_tm1[[j]] %in% R_tpi) > 0){
-      rho_tm1.R[[length(rho_tm1.R) + 1]] <- rho_tm1[[j]][rho_tm1[[j]] %in% R_tpi]
-    }
-  }
-  
-  for (j in 1:length(rho_t)){
-    if (sum(rho_t[[j]] %in% R_tpi) > 0){
-      rho_t.R[[length(rho_t.R) + 1]] <- rho_t[[j]][rho_t[[j]] %in% R_tpi]
-    }
-  }
-  
-  
-  ############################################################################
-  ### Voglio ordinare le "partizioni ridotte" al tempo t-1 e t per poterle ###
-  ### confrontare facilmente. Ordino ciascun vettore all'interno delle     ###
-  ### liste e poi ordino tra di loro i vettori in base al primo elemento   ###
-  ############################################################################
-  
-  check <- are.partitions.equal(rho_tm1.R, rho_t.R)
+  check <- all(lab_tm1.R == lab_t.R)
   
   
   # Vedi formula S.9 del materiale supplementare di Page
   # Devo calcolare la predictive per l'i-esima osservazione data la 
-  #   partizione ridotta a R_{t-1}^{(-i)}
+  #   partizione ridotta a R_{t}^{(-i)}
+  
   
   # Trova insieme della partizione con dentro i
-  j <- which(vapply(rho_t.R, is.element, el = i, FUN.VALUE = FALSE))
-  n <- sum(vapply(rho_t.R, length, FUN.VALUE = integer(1))) - 1
+  j <- lab_t.R[i]
+  n.R <- sum(lab_t.R > 0) - 1
+  n_j <- sum(lab_t.R == j)
   
-  if (n == 0) { # se la partizione a cui ci condizioniamo è vuota
+  if (n.R == 0) { # se la partizione a cui ci condizioniamo è vuota
     ratio <- 1
   } else {
-    if (length(rho_t.R[[j]]) == 1) {
+    if (n_j == 1) {
       # se l'unità "i" è in un nuovo cluster
-      ratio <- M / (n + M)
+      ratio <- M / (n.R + M)
     } else { # se l'unità "i" è in un cluster già esistente
-      ratio <- (length(rho_t.R[[j]]) - 1) / (n + M)
+      ratio <- (n_j - 1) / (n.R + M)
     }
   }
   
@@ -194,7 +179,7 @@ up_label_i <- function(i, j,
                        beta_i,
                        beta_cluster,
                        sigma2_i,
-                       rho_t, rho_tp1, gamma_tp1,
+                       lab_t, lab_tp1, gamma_tp1,
                        newclustervalue,
                        spline_basis) {
   
@@ -216,28 +201,42 @@ up_label_i <- function(i, j,
   logp <- c()
   
   # Cluster in cui è l'i-esima osservazione
-  k <- which(vapply(rho_t, is.element, el = i, FUN.VALUE = FALSE))
+  # k <- which(vapply(rho_t, is.element, el = i, FUN.VALUE = FALSE))
+  k <- lab_t[i]
   
   # Partizione senza i-esima osservazione
-  rho_tmi <- rho_t
-  rho_tmi[[k]] <- rho_tmi[[k]][rho_tmi[[k]] != i]
+  # rho_tmi <- rho_t
+  # rho_tmi[[k]] <- rho_tmi[[k]][rho_tmi[[k]] != i]
+  lab_tmi <- lab_t
+  lab_tmi[i] <- -1
   
-  whichclusters <- which(vapply(rho_tmi, function(x) length(x)>0, FUN.VALUE = FALSE)) # cluster esistenti
+  
+  # whichclusters <- which(vapply(rho_tmi, function(x) length(x)>0, FUN.VALUE = FALSE)) # cluster esistenti
+  whichclusters <- unique(lab_tmi[lab_tmi > 0])
   whichclusters <- c(whichclusters, max(whichclusters)+1L) # aggiungo il possibile cluster nuovo
   # Uso "1L" per farlo venire integer, altrimenti il "+1" lo rende un float
+  
+  # whichcluster non è ordinata - e.g. può essere (2, 1, 3, 4) invece di c(1, 2, 3, 4) -,
+  #   ma non è un problema, perché alla fine della funzione utilizzo 
+  #   whichcluster[which.max(lll)], quindi l'importante è che ci sia corrispondenza
+  #   tra l'ordine di whichcluster e quello di lll (cosa che succede visto come
+  #   è creato logp)
   
   for (h in whichclusters){
     # Devo costruire la partizione con l'i-esima osservazione inserita
     #   nell'h-esimo cluster
-    rho_t.h <- rho_tmi
-    if (h < max(whichclusters)){ # se assegno ad un cluster già esistente
-      rho_t.h[[h]] <- c(rho_t.h[[h]], i) 
-    } else { # se assegno al nuovo cluster
-      rho_t.h[[h]] <- i 
-    }
+    # rho_t.h <- rho_tmi
+    # if (h < max(whichclusters)){ # se assegno ad un cluster già esistente
+    #   rho_t.h[[h]] <- c(rho_t.h[[h]], i) 
+    # } else { # se assegno al nuovo cluster
+    #   rho_t.h[[h]] <- i 
+    # }
+    lab_t.h <- lab_tmi
+    lab_t.h[i] <- h
     
     # Nel paper di Page: Pr(c_it = h).
-    prob_cit <- dCRP(vapply(rho_t.h, length, FUN.VALUE = integer(1)), M)
+    # prob_cit <- dCRP(vapply(rho_t.h, length, FUN.VALUE = integer(1)), M)
+    prob_cit <- dCRP(tabulate(lab_t.h), M)
     
     # Nel paper di Page: N(Y_it | bla bla).we
     # Per me ci sarà il prodotto di Pr(Y_{ixt} |  beta, ecc) per tutti gli x.
@@ -257,23 +256,29 @@ up_label_i <- function(i, j,
       check <- TRUE
     } else {
       R_tp1 <- which(gamma_tp1 == 1)
-      rho_tp1.R <- list()
-      rho_t.h.R <- list()
+      # rho_tp1.R <- list()
+      # rho_t.h.R <- list()
+      lab_tp1.R <- rep(-1, length(lab_t))
+      lab_t.h.R <- rep(-1, length(lab_t))
       
-      for (kk in 1:length(rho_t.h)){
-        if (sum(rho_t.h[[kk]] %in% R_tp1) > 0){
-          rho_t.h.R[[length(rho_t.h.R) + 1]] <- rho_t.h[[kk]][rho_t.h[[kk]] %in% R_tp1]
-        }
-      }
+      # for (kk in 1:length(rho_t.h)){
+      #   if (sum(rho_t.h[[kk]] %in% R_tp1) > 0){
+      #     rho_t.h.R[[length(rho_t.h.R) + 1]] <- rho_t.h[[kk]][rho_t.h[[kk]] %in% R_tp1]
+      #   }
+      # }
+      lab_t.h.R[R_tp1] <- lab_t.h[R_tp1]
       
-      for (kkk in 1:length(rho_tp1)){
-        # Ho aggiunto il seguente "if" per non mettere vettori 
-        #   vuoti in rho_tp1.R
-        if (sum(rho_tp1[[kkk]] %in% R_tp1) > 0){
-          rho_tp1.R[[length(rho_tp1.R) + 1]] <- rho_tp1[[kkk]][rho_tp1[[kkk]] %in% R_tp1]
-        }
-      }
-      check <- are.partitions.equal(rho_t.h.R, rho_tp1.R)
+      # for (kkk in 1:length(rho_tp1)){
+      #   # Ho aggiunto il seguente "if" per non mettere vettori 
+      #   #   vuoti in rho_tp1.R
+      #   if (sum(rho_tp1[[kkk]] %in% R_tp1) > 0){
+      #     rho_tp1.R[[length(rho_tp1.R) + 1]] <- rho_tp1[[kkk]][rho_tp1[[kkk]] %in% R_tp1]
+      #   }
+      # }
+      lab_tp1.R[R_tp1] <- lab_tp1[R_tp1]
+      
+      # check <- are.partitions.equal(rho_t.h.R, rho_tp1.R)
+      check <- all(lab_t.h.R == lab_tp1.R)
     }
     
     means <- drop(spline_basis %*% beta_i)
@@ -281,7 +286,7 @@ up_label_i <- function(i, j,
                           mean = means,
                           sd = sqrt(sigma2_i),
                           log = TRUE))
-    
+    if (exp(logpnorm) > 0.01) {cat(exp(logpnorm), '\n')}
     logp <- c(logp, 
               log(prob_cit) + logpnorm + log(check))
   }
@@ -327,8 +332,8 @@ up_beta <- function(j, k, t,
   
   # Devo trovare quali osservazioni appartengono al cluster k per il 
   #   e coeff. j e poi uso conjugacy Gauss-Gauss.
-  obs <- lab2rho(labels_t[ , j])[[k]]
-  
+  # obs <- lab2rho(labels_t[ , j])[[k]]
+  obs <- which(labels_t[ , j] == k)
   
   # Lavoro su \tilde{Y}_ixt, cioè le osservazioni Y_{ixt} meno le spline tranne
   #   la j-esima, così che beta_jkt*g_j(x) sia la media di questa

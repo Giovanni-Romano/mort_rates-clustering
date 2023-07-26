@@ -6,7 +6,7 @@ library(tidyverse)
 library(invgamma)
 
 load("C:/Users/RomanoGi/Desktop/Bocconi/Ricerca/BSP_Pavone/output/mortality.Rdata")
-load("fit_indep.Rdata")
+load("C:/Users/RomanoGi/Desktop/Bocconi/Ricerca/mort_rates-clustering/fit_indep.RData")
 source("funzioni.R")
 
 data_list_man <- list(ita_man = log(Y_ita_man / N_ita_man),
@@ -226,7 +226,6 @@ for (j in 1:p){
 rm(j); rm(t)
 
 
-inizio <- Sys.time()
 
 
 ### ### ### ### ### ###
@@ -235,8 +234,9 @@ inizio <- Sys.time()
 # Ipotizzo di volerlo fare per gli uomini
 Y <- data_list_man
 
+inizio <- Sys.time()
 
-for (d in 2:n_iter){ # Ciclo sulle iterazioni
+for (d in 2:21){ # Ciclo sulle iterazioni
   
   if ((d %% 50) == 0) {cat(d, "\n")}
   
@@ -244,18 +244,6 @@ for (d in 2:n_iter){ # Ciclo sulle iterazioni
     for (t in 1:T_final){ # Ciclo sugli istanti
       ### ### ### ### ### ### ####
       ### ### UPDATE GAMMA ### ###
-      # Recupero le partizioni al tempo t, t-1 e t+1.
-      #   Lo faccio qui perché è uguale per tutte le osservazioni i e
-      #   lo userò anche dopo per l'update delle labels.
-      # Se t==1 non mi serve rho_tm1 perché non devo fare il confronto
-      #   di compatibilità.
-      if (t > 1){
-        rho_tm1 <- lab2rho(labels_temp[[j]][, t-1])
-      }
-      rho_t <- lab2rho(labels_temp[[j]][, t])
-      if (t < T_final){
-        rho_tp1 <- lab2rho(labels_temp[[j]][, t+1])
-      }
       
       for (i in 1:n){ # Ciclo sulle osservazioni per gamma
         # Potrei direttamente saltare il caso t==1 perché tanto
@@ -270,8 +258,8 @@ for (d in 2:n_iter){ # Ciclo sulle iterazioni
           gamma_temp[[j]][i, t] <- up_gamma_i(i = i, 
                                               gamma = gamma_temp[[j]][, t], 
                                               alpha_t = alpha_temp[[j]],
-                                              rho_t = rho_t,
-                                              rho_tm1 = rho_tm1)
+                                              lab_t = labels_temp[[j]][, t],
+                                              lab_tm1 = labels_temp[[j]][, t-1])
         }
       } # Fine ciclo sulle osservazioni per gamma
       
@@ -298,8 +286,8 @@ for (d in 2:n_iter){ # Ciclo sulle iterazioni
                                               beta_i = beta_actual,
                                               beta_cluster = beta_temp[[j]][, t],
                                               sigma2_i = sigma_temp[i],
-                                              rho_t = lab2rho(labels_temp[[j]][,t]),
-                                              rho_tp1 = lab2rho(labels_temp[[j]][,t]), 
+                                              lab_t = labels_temp[[j]][,t],
+                                              lab_tp1 = labels_temp[[j]][,t], 
                                               gamma_tp1 = if (t == T_final) {'last time'} 
                                               else {gamma_temp[[j]][, t+1]},
                                               newclustervalue = newclustervalue,
@@ -457,7 +445,6 @@ for (d in 2:n_iter){ # Ciclo sulle iterazioni
   
   
 } # END OF FOR LOOP OVER ITERATIONS "d"
-
 
 fine <- Sys.time()
 
