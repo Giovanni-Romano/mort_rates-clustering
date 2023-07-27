@@ -91,7 +91,7 @@ M <- 2
 ### ### ### ### ### ### ### ### ### ###
 
 # Numero iterazioni
-n_iter <- 2000
+n_iter <- 5000
 # RW step sizes
 #   I've done some diagnostics and it seems that the best thing to do is to 
 #   to pick a large stepsize, so I set it equal to the size of the domain
@@ -232,13 +232,13 @@ rm(j); rm(t)
 ### GIBBS SAMPLING ####
 ### ### ### ### ### ###
 # Ipotizzo di volerlo fare per gli uomini
-Y <- data_list_man
+Y <- lapply(data_list_man, function(x) x[1:87, 1:101])
 
 inizio <- Sys.time()
 
-for (d in 2:21){ # Ciclo sulle iterazioni
+for (d in 2:n_iter){ # Ciclo sulle iterazioni
   
-  if ((d %% 50) == 0) {cat(d, "\n")}
+  if ((d %% 50) == 0) {cat(d, Sys.time() - inizio, "\n")}
   
   for (j in 1:p){ # Ciclo sui coefficienti
     for (t in 1:T_final){ # Ciclo sugli istanti
@@ -443,6 +443,20 @@ for (d in 2:21){ # Ciclo sulle iterazioni
                mean = lambda_temp,
                hyppar = A_xi)
   
+  ### ### ### ### ### ##
+  ### UPDATE SIGMA_i ###
+  for (i in 1:n){
+    # T times p matrix with the coefficients of the splines for the i-th obs
+    beta_actual <- vapply(1:p, 
+                          function(x) beta_temp[[x]][cbind(labels_temp[[x]][i, ], 1:87)],
+                          FUN.VALUE = double(87))
+    sigma_res[i, d] <- sigma_temp[i] <- 
+      up_var.RWM(val_now = sigma_temp[i],
+                 eps = eps_sigma,
+                 data = Y[[i]],
+                 mean = beta_actual %*% t(S),
+                 hyppar = A_sigma)
+  }
   
 } # END OF FOR LOOP OVER ITERATIONS "d"
 
@@ -450,4 +464,4 @@ fine <- Sys.time()
 
 fine - inizio
 
-# save.image("C:/Users/RomanoGi/Desktop/Bocconi/Ricerca/mort_rates-clustering/1st_sim_data.RData")
+# save.image("C:/Users/RomanoGi/Desktop/Bocconi/Ricerca/mort_rates-clustering/res/4th_sim/4th_sim_data.RData")
