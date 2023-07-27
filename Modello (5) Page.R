@@ -71,16 +71,17 @@ T_final
 n <- length(data_list_man); n
 # Dimensione stato latente (-> numero coeff)
 p <- ncol(S)
+# Varianza delle osservazioni fissata
+sigma2 <- rep(0.01, n)
 # Iperparametri della prior dell'ultimo layer
 m0 <- 0; s02 <- 1 
 # Uniforms' hyperparameters
 #   Following Page's idea in paragraph 2.5 I choose these hyperparams
-A_sigma <- 5
 A_tau <- A_delta <- A_xi <- 10
 # Hyperparams for the Beta prior on alpha
 a_alpha <- b_alpha <- 1
 # Parametro di concentrazione del CRP
-M <- 2
+M <- 3
 
 
 
@@ -91,14 +92,13 @@ M <- 2
 ### ### ### ### ### ### ### ### ### ###
 
 # Numero iterazioni
-n_iter <- 2000
+n_iter <- 5000
 # RW step sizes
 #   I've done some diagnostics and it seems that the best thing to do is to 
 #   to pick a large stepsize, so I set it equal to the size of the domain
 eps_tau <- A_tau
 eps_delta <- A_delta
 eps_xi <- A_xi
-eps_sigma <- A_sigma
 
 
 
@@ -154,12 +154,6 @@ alpha_res <- replicate(p,
 
 lambda_res <- xi_res <- rep(NA, n_iter)
 
-sigma_res <- array(NA,
-                   dim = c(n, # numero osservazioni
-                           n_iter # numero iterazioni
-                           )
-                   )
-
 
 # Temp objects
 gamma_temp <- labels_temp <-
@@ -181,15 +175,12 @@ theta_temp <- tau_temp <- replicate(p,
 phi_temp <- delta_temp <- replicate(p, list(NA))
 alpha_temp <- replicate(p, list(NA))
 lambda_temp <- xi_temp <- NA
-sigma_temp <- rep(NA, n)
 
 
 
 ### ### ### ### ### ###
 ### Inizializzazioni ##
 ### ### ### ### ### ###
-sigma_res[, 1] <- sigma_temp <- runif(n, 0, A_sigma)
-  
 xi_res[1] <- xi_temp <- 
   runif(1, 0, A_xi)
 lambda_res[1] <- lambda_temp <- 
@@ -236,9 +227,9 @@ Y <- data_list_man
 
 inizio <- Sys.time()
 
-for (d in 2:21){ # Ciclo sulle iterazioni
+for (d in 2:n_iter){ # Ciclo sulle iterazioni
   
-  if ((d %% 50) == 0) {cat(d, "\n")}
+  if ((d %% 100) == 0) {cat(d, "\n")}
   
   for (j in 1:p){ # Ciclo sui coefficienti
     for (t in 1:T_final){ # Ciclo sugli istanti
@@ -285,7 +276,7 @@ for (d in 2:21){ # Ciclo sulle iterazioni
                                               Y_it = Y[[i]][t, ],
                                               beta_i = beta_actual,
                                               beta_cluster = beta_temp[[j]][, t],
-                                              sigma2_i = sigma_temp[i],
+                                              sigma2_i = sigma2[i],
                                               lab_t = labels_temp[[j]][,t],
                                               lab_tp1 = labels_temp[[j]][,t], 
                                               gamma_tp1 = if (t == T_final) {'last time'} 
@@ -361,7 +352,7 @@ for (d in 2:21){ # Ciclo sulle iterazioni
                                                          FUN.VALUE = double(4)),
                                         theta_jt = theta_temp[[j]][t], 
                                         tau_jt = tau_temp[[j]][t],
-                                        sigma2_vec = sigma_temp,
+                                        sigma2_vec = sigma2,
                                         labels_t = vapply(labels_temp, 
                                                           function(lab) lab[, t], 
                                                           FUN.VALUE = double(4)),
@@ -450,4 +441,4 @@ fine <- Sys.time()
 
 fine - inizio
 
-# save.image("C:/Users/RomanoGi/Desktop/Bocconi/Ricerca/mort_rates-clustering/1st_sim_data.RData")
+# save.image("C:/Users/RomanoGi/Desktop/Bocconi/Ricerca/mort_rates-clustering/res/3rd_sim/3rd_sim_data.RData")
