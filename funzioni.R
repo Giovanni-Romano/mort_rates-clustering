@@ -174,20 +174,16 @@ up_gamma_i <- function(i, gamma, alpha_t, lab_t, lab_tm1){
 ### ### ### ### ### ### ### ###
 #### UPDATE CLUSTER LABELS ####
 ### ### ### ### ### ### ### ###
-up_label_i <- function(i, j,
+up_label_i <- function(i,
                        Y_it,
-                       beta_i,
                        beta_cluster,
                        sigma2_i,
                        lab_t, lab_tp1, gamma_tp1,
-                       newclustervalue,
-                       spline_basis) {
+                       newclustervalue) {
   
   ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ###
   ### - i: indice dell'unità che stiamo aggiornando
-  ### - j: indice del coefficiente che stiamo aggiornando
   ### - Y_it: vettore con Y_{ixt} per ogni x
-  ### - beta_i: vettore con i beta dell'osservazione i-esima al tempo t
   ### - beta_cluster: vettore con i beta dei cluster del j-esimo coeff. al tempo t
   ### - sigma2_i: varianza dell'i-esima osservazione
   ### - rho_t: partizione al tempo t PER IL COEFF j
@@ -195,7 +191,6 @@ up_label_i <- function(i, j,
   ### - gamma_tp1: gamma_{t+1}, per trovare la partizione ridotta;
   ###               all'istante finale passare 'last time'
   ### - newclustevalue: valore per il nuovo cluster
-  ### - spline_basis: matrice con i valori delle basi spline
   
   # Inizializzazione vettore probabilità della multinomiale
   logp <- c()
@@ -225,12 +220,6 @@ up_label_i <- function(i, j,
   for (h in whichclusters){
     # Devo costruire la partizione con l'i-esima osservazione inserita
     #   nell'h-esimo cluster
-    # rho_t.h <- rho_tmi
-    # if (h < max(whichclusters)){ # se assegno ad un cluster già esistente
-    #   rho_t.h[[h]] <- c(rho_t.h[[h]], i) 
-    # } else { # se assegno al nuovo cluster
-    #   rho_t.h[[h]] <- i 
-    # }
     lab_t.h <- lab_tmi
     lab_t.h[i] <- h
     
@@ -238,17 +227,12 @@ up_label_i <- function(i, j,
     # prob_cit <- dCRP(vapply(rho_t.h, length, FUN.VALUE = integer(1)), M)
     prob_cit <- dCRP(tabulate(lab_t.h), M)
     
-    # Nel paper di Page: N(Y_it | bla bla).we
-    # Per me ci sarà il prodotto di Pr(Y_{ixt} |  beta, ecc) per tutti gli x.
+    # Nel paper di Page: N(Y_it | bla bla)
     if (h < max(whichclusters)){ # se il cluster è già esistente, devo usare il beta di quel cluster
       beta <- beta_cluster[h]
     } else { # se il cluster è nuovo, devo simulare la media dalla prior
       beta <- newclustervalue
     }
-    # I beta che devo usare sono il vettore beta_i, sostituendo
-    #   per il j-esimo coeff. il beta che ho appena calcolato.
-    #
-    beta_i[j] <- beta
     
     # Nel paper di Page: indicatrice sulle partizioni ridotte
     #   per prima cosa devo trovare la partizione ridotta
@@ -256,37 +240,21 @@ up_label_i <- function(i, j,
       check <- TRUE
     } else {
       R_tp1 <- which(gamma_tp1 == 1)
-      # rho_tp1.R <- list()
-      # rho_t.h.R <- list()
+      
       lab_tp1.R <- rep(-1, length(lab_t))
       lab_t.h.R <- rep(-1, length(lab_t))
-      
-      # for (kk in 1:length(rho_t.h)){
-      #   if (sum(rho_t.h[[kk]] %in% R_tp1) > 0){
-      #     rho_t.h.R[[length(rho_t.h.R) + 1]] <- rho_t.h[[kk]][rho_t.h[[kk]] %in% R_tp1]
-      #   }
-      # }
       lab_t.h.R[R_tp1] <- lab_t.h[R_tp1]
       
-      # for (kkk in 1:length(rho_tp1)){
-      #   # Ho aggiunto il seguente "if" per non mettere vettori 
-      #   #   vuoti in rho_tp1.R
-      #   if (sum(rho_tp1[[kkk]] %in% R_tp1) > 0){
-      #     rho_tp1.R[[length(rho_tp1.R) + 1]] <- rho_tp1[[kkk]][rho_tp1[[kkk]] %in% R_tp1]
-      #   }
-      # }
       lab_tp1.R[R_tp1] <- lab_tp1[R_tp1]
       
-      # check <- are.partitions.equal(rho_t.h.R, rho_tp1.R)
       check <- all(lab_t.h.R == lab_tp1.R)
     }
     
-    means <- drop(spline_basis %*% beta_i)
-    logpnorm <- sum(dnorm(Y_it, 
-                          mean = means,
-                          sd = sqrt(sigma2_i),
-                          log = TRUE))
-    if (exp(logpnorm) > 0.01) {cat(exp(logpnorm), '\n')}
+    logpnorm <- dnorm(Y_it, 
+                      mean = beta,
+                      sd = sqrt(sigma2_i),
+                      log = TRUE)
+    # if (exp(logpnorm) > 0.01) {browser()}
     logp <- c(logp, 
               log(prob_cit) + logpnorm + log(check))
   }
@@ -311,59 +279,29 @@ up_label_i <- function(i, j,
 ## ### ### ### ### ##
 #### UPDATE BETA ####
 ## ### ### ### ### ##
-up_beta <- function(j, k, t,
+up_beta <- function(k, t,
                     Y_t,
-                    beta_t,
-                    theta_jt, tau_jt,
+                    theta_t, tau_t,
                     sigma2_vec,
-                    labels_t,
-                    spline_basis){
+                    labels_t){
   ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ###
-  ### - j: indice del coefficiente di cui stiamo aggiornando la media
   ### - k: indice del cluster di cui stiamo aggiornando la media
   ### - t: istante temporale attuale
-  ### - Y_t: matrix with Y_{ixt} for all obs. i and all obs. x
-  ### - beta_t: matrice con i beta per tutti i cluster per tutti i coeff. 
-  ###           al tempo t
-  ### - theta_jt, tau_jt: media e varianza della prior dei beta
+  ### - Y_t: vector with Y_it for all observations i
+  ### - theta_t, tau_t: media e varianza della prior su beta
   ### - sigma2_vec: vettore con le varianze delle osservazioni
-  ### - labels_t: matrice delle label al tempo t per tutti i coeff.
-  ### - spline_basis: matrice con i valori delle basi spline
+  ### - labels_t: vector w/ labels at time t
   
-  # Devo trovare quali osservazioni appartengono al cluster k per il 
-  #   e coeff. j e poi uso conjugacy Gauss-Gauss.
-  # obs <- lab2rho(labels_t[ , j])[[k]]
-  obs <- which(labels_t[ , j] == k)
-  
-  # Lavoro su \tilde{Y}_ixt, cioè le osservazioni Y_{ixt} meno le spline tranne
-  #   la j-esima, così che beta_jkt*g_j(x) sia la media di questa
-  #   nuova variabile. Inoltre tengo solo le osservazioni che servono, cioè 
-  #   quelle che per il coefficiente j appartengono al cluster k
-  
-  # Devo recuperare i beta giusti per ogni osservazione per ogni coeff. != j
-  p <- ncol(spline_basis)
-  beta_actual <- vapply(1:p, 
-                        function(x) beta_t[labels_t[ , x], x],
-                        FUN.VALUE = double(4))[obs, -j] # tolgo la j-esima colonna
-                                                        # e le oss. non nel cluster
-  # Costruisco effettivamente \tilde{Y}_t
-  Y_t.tilde <- Y_t[obs, ] - beta_actual %*% t(spline_basis[ , -j])
-  # Se Y_t.tilde ha una riga sola, lo trasformo in vettore; se ha più di 
-  #   una riga, non succede niente.
-  Y_t.tilde <- drop(Y_t.tilde)
-  
-  
-  # Devo togliere le sigma2_i delle osservazioni che non usiamo
-  sigma2_vec <- sigma2_vec[obs]
+  # Devo trovare quali osservazioni appartengono al cluster k
+  #   e poi uso conjugacy Gauss-Gauss.
+  obs <- which(labels_t == k)
   
   
   # Varianza a posteriori
-  var.post <- ( 1 / tau_jt + sum(1/sigma2_vec)*sum(spline_basis[, j]^2) )^(-1)
+  var.post <- ( 1 / tau_t + sum(1/sigma2_vec))^(-1)
   # Media a posteriori
   mean.post <- var.post * 
-    ( sum( t(t(Y_t.tilde)*spline_basis[ , j])/sigma2_vec ) + 
-        theta_jt / tau_jt )
-  # Devo fare il doppio trasposto per sfruttare bene il prodotto element-wise
+    ( sum( Y_t[obs]/sigma2_vec[obs] ) + theta_t / tau_t )
   
   beta_updated <- rnorm(1, mean = mean.post, sd = sqrt(var.post))
   
@@ -399,25 +337,27 @@ GaussGaussUpdate_iid <- function (xbar, n, datavar, priormean, priorvar)
 ### ### ### ### ### ##
 #### UPDATE THETA ####
 ### ### ### ### ### ##
-up_theta_jt <- function(beta_jt,
-                        tau_jt,
-                        phi_j,
-                        delta_j){
+up_theta_t <- function(beta_t,
+                        tau_t,
+                        phi,
+                        delta){
   ### ### ### ### ### ### ### ### ### ### ### ### ### ###
-  ### - beta_jt: vector of beta_kjt for all clusters k
+  ### - beta_t: vector of beta_kt for all clusters k
   ### - the other parameters' names are clear
   
-  x <- beta_jt[!is.na(beta_jt)]
+  x <- beta_t[!is.na(beta_t)]
   xbar <- mean(x)
   n <- length(x)
   
   postpar <- GaussGaussUpdate_iid(xbar = xbar,
                                   n = n,
-                                  datavar = tau_jt,
-                                  priormean = phi_j,
-                                  priorvar = delta_j)
+                                  datavar = tau_t,
+                                  priormean = phi,
+                                  priorvar = delta)
   
-  out <- rnorm(1, postpar[1], sqrt(postpar[2]))
+  out <- rnorm(1, 
+               mean = postpar[1], 
+               sd = sqrt(postpar[2]))
   
   return(out)
 }
@@ -429,109 +369,30 @@ up_theta_jt <- function(beta_jt,
 ### ### #### ### ### 
 #### UPDATE PHI ####
 ### ### #### ### ### 
-up_phi_j <- function(theta_j,
-                     delta_j,
-                     lambda,
-                     xi){
+up_phi <- function(theta,
+                   delta,
+                   m0,
+                   s02){
   ### ### ### ### ### ### ### ### ### ### ### ### ### ###
-  ### - theta_j: vector with theta_jt for all t
+  ### - theta: vector with theta_t for all t
   ### - the other parameters' names are clear
   
-  x <- theta_j
+  x <- theta
   xbar <- mean(x)
   n <- length(x)
   
   postpar <- GaussGaussUpdate_iid(xbar = xbar,
                                   n = n,
-                                  datavar = delta_j,
-                                  priormean = lambda,
-                                  priorvar = xi)
-  
-  out <- rnorm(1, postpar[1], sqrt(postpar[2]))
-  
-  return(out)
-}
-
-
-
-
-
-### ### #### ### ### ## 
-#### UPDATE LAMBDA ####
-### ### #### ### ### ##
-up_lambda <- function(phi,
-                     xi,
-                     m0,
-                     s02){
-  ### ### ### ### ### ### ### ### ### ### ### ### ### ###
-  ### - phi: vector with phi_j for all j
-  ### - the other parameters' names are clear
-  
-  x <- phi
-  xbar <- mean(x)
-  n <- length(x)
-  
-  postpar <- GaussGaussUpdate_iid(xbar = xbar,
-                                  n = n,
-                                  datavar = xi,
+                                  datavar = delta,
                                   priormean = m0,
                                   priorvar = s02)
   
-  out <- rnorm(1, postpar[1], sqrt(postpar[2]))
+  out <- rnorm(1, 
+               mean = postpar[1], 
+               sd = sqrt(postpar[2]))
   
   return(out)
 }
-
-
-
-
-
-# ## ### ### ### ### #
-# #### UPDATE TAU ####
-# ## ### ### ### ### #
-# up_tau <- function(tau_now,
-#                    epsilon,
-#                    beta_t,
-#                    theta_t,
-#                    A_tau){
-#   ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ###
-#   ### - tau_now: vector w/ current values of tau_jt for all j
-#   ### - eps: RW step size
-#   ### - beta_t: n*p matrix of beta_{kjt} for all clusters k and for all coeff. j
-#   ### - theta_t: p-vector of theta_{jt} for all coeff.'s j
-#   ### - A_tau: hyperparam of prior on tau's
-#   
-#   # Sample proposed value
-#   tau_prop <- runif(ncol(beta_t), tau_now - eps, tau_now + eps)
-#   
-#   
-#   # Vector with prob's of acceptance
-#   
-#   # Indicator to check if proposed values are in the domain
-#   indicator <- log(as.integer(tau_prop > 0 & tau_prop < A_tau))
-#   
-#   # Likelihood of current values and proposed ones
-#   #   I have to transpose beta_t because R fills matrices by columns and beta_t
-#   #   is n*p and theta_t is p*1.
-#   likel_now <- rowSums(dnorm(t(beta_t), 
-#                              mean = theta_t, 
-#                              sd = sqrt(tau_now),
-#                              log = TRUE),
-#                        na.rm = TRUE) 
-#   likel_prop <- rowSums(dnorm(t(beta_t), 
-#                               mean = theta_t,
-#                               sd = sqrt(tau_prop),
-#                               log = TRUE),
-#                         na.rm = TRUE)
-#   logprob <- indicator + likel_now - likel_prop
-#   
-#   # Create output
-#   out <- tau_now
-#   # If prob. of accept. is >= than 1 (so log>=0), accept proposed value
-#   out[logprob >= 0] <- tau_prop[logprob >= 0]
-#   
-#   return(out)
-# }
 
 
 
@@ -543,18 +404,18 @@ up_lambda <- function(phi,
 # Function for the RW Metropolis (RWM) for tau, delta and xi
 # It is written to update one param. at a time
 up_var.RWM <- function(val_now,
-                   eps,
-                   data,
-                   mean,
-                   hyppar){
+                       eps,
+                       data,
+                       mean,
+                       hyppar){
   ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ###
-  ### - val_now: vector w/ current value of tau_jt/delta_t/xi
+  ### - val_now: vector w/ current value of tau_t/delta
   ### - eps: RW step size
-  ### - data: object that as the role of data in the posterior update, so
-  ###         beta_kjt(for all k)/theta_jt(for all j)/phi_t(for all t) respectively
+  ### - data: object that has the role of data in the posterior update, so
+  ###         beta_kt(for all k)/theta_t(for all t) respectively
   ### - mean: the mean of the distrib. of the "data", so respectively
-  ###         theta_jt/phi_t/lambda
-  ### - hyppar: hyperparam of prior, so respectively A_tau/A_delta/A_xi
+  ###         theta_t/phi
+  ### - hyppar: hyperparam of prior, so respectively A_tau/A_delta
   
   # Sample proposed value
   val_prop <- runif(1, val_now - eps, val_now + eps)
@@ -596,10 +457,10 @@ up_var.RWM <- function(val_now,
 ### ### ### ### ### ##
 #### UPDATE ALPHA ####
 ### ### ### ### ### ##
-up_alpha_j <- function(sum_data,
-                       n,
-                       priorshape1,
-                       priorshape2){
+up_alpha <- function(sum_data,
+                     n,
+                     priorshape1,
+                     priorshape2){
   out <- rbeta(1, 
                priorshape1 + sum_data, 
                priorshape2 + n - sum_data)
