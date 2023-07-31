@@ -286,7 +286,7 @@ up_label_i <- function(i, j,
                           mean = means,
                           sd = sqrt(sigma2_i),
                           log = TRUE))
-    if (exp(logpnorm) > 0.01) {cat(exp(logpnorm), '\n')}
+    # if (exp(logpnorm) > 0.01) {cat(exp(logpnorm), '\n')}
     logp <- c(logp, 
               log(prob_cit) + logpnorm + log(check))
   }

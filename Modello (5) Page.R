@@ -74,7 +74,7 @@ p <- ncol(S)
 # Varianza delle osservazioni fissata
 sigma2 <- rep(0.01, n)
 # Iperparametri della prior dell'ultimo layer
-m0 <- 0; s02 <- 1 
+m0 <- 0; s02 <- 100
 # Uniforms' hyperparameters
 #   Following Page's idea in paragraph 2.5 I choose these hyperparams
 A_tau <- A_delta <- A_xi <- 10
@@ -195,7 +195,7 @@ for (j in 1:p){
   alpha_res[[j]][1] <- alpha_temp[[j]] <- rbeta(1, a_alpha, b_alpha)
   
   theta_res[[j]][ , 1] <- theta_temp[[j]] <- 
-    rnorm(T_final, phi_temp[[j]], delta_temp[[j]])
+    rnorm(T_final, phi_temp[[j]], sqrt(delta_temp[[j]]))
   tau_res[[j]][ , 1] <- tau_temp[[j]] <- 
     runif(T_final, 0, A_tau)
   
@@ -210,7 +210,7 @@ for (j in 1:p){
     labels_temp[[j]][, t] <- labels_res[[j]][, t, 1] <- lab
     beta_res[[j]][1:max(lab), t, 1] <- beta_temp[[j]][1:max(lab), t] <- 
       rnorm(max(lab),
-            mean = theta_temp[[j]][t], sd = tau_temp[[j]][t])
+            mean = theta_temp[[j]][t], sd = sqrt(tau_temp[[j]][t]))
   }
 }
 
@@ -267,7 +267,7 @@ for (d in 2:n_iter){ # Ciclo sulle iterazioni
         
         
         # Campiono possibile nuovo valore per beta
-        newclustervalue <- rnorm(1, theta_temp[[j]][t], tau_temp[[j]][t])
+        newclustervalue <- rnorm(1, theta_temp[[j]][t], sqrt(tau_temp[[j]][t]))
         
         
         # Non assegno qua anche a labels_res perché dovrò prima sistemarlo
