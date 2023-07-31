@@ -3,51 +3,6 @@ library(ggplot2)
 library(reshape2)
 library(dplyr)
 
-# load("C:/Users/RomanoGi/Desktop/Bocconi/Ricerca/mort_rates-clustering/1st_sim_data.RData")
-# rm(list = c("beta_actual", "beta_extended", 
-#             "beta_new", "counter",
-#             "dCRP", "gamma_temp",
-#             "GaussGaussUpdate_iid",
-#             "lab", "labels_new",
-#             "lambda_temp", "lab2rho", 
-#             "newclustervalue",
-#             "rCRP",
-#             "rho_t", "rho_tm1", "rho_tp1",
-#             "rho2lab", "sort_beta_temp",
-#             "sigma_temp", "tau_temp",
-#             "theta_temp",
-#             "up_gamma_i", "up_alpha_j",
-#             "up_beta", "up_label_i",
-#             "up_lambda", "up_phi_j",
-#             "up_theta_jt", "up_var.RWM",
-#             "xi_temp"))
-# # Point estimate of partitions through SALSO
-# library(salso)
-# est_clust <- lapply(labels_res, 
-#                     function(x)
-#                       apply(x[ , , -burn_in], 2, 
-#                             function(y)
-#                               salso(x = t(y),
-#                                     loss = binder(a = NULL),
-#                                     maxNClusters = 4,
-#                                     maxZealousAttempts = 10,
-#                                     nRuns = 11,
-#                                     nCores = 11
-#                               )
-#                       )
-# )
-# str(est_clust)
-# 
-# # Non mettendo "a = NULL" in binder() venivano tutte partizioni con un 
-# #   solo cluster.
-# # Con "a = NULL" ci mette tanto, ma trova
-# lapply(est_clust, function(x) apply(x, 2, function(y) length(unique(y))))
-# save.image("1st_sim_cleaned.RData")
-
-
-load("C:/Users/RomanoGi/Desktop/Bocconi/Ricerca/mort_rates-clustering/1st_sim_cleaned.RData")
-
-
 theme_set(
   theme_light() +
     theme(text = element_text(size = 14),
@@ -58,7 +13,7 @@ theme_set(
 )
 
 
-burn_in <- 1:500
+burn_in <- 1:1000
 
 
 
