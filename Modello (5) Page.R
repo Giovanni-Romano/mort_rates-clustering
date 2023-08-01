@@ -72,12 +72,13 @@ n <- length(data_list_man); n
 # Dimensione stato latente (-> numero coeff)
 p <- ncol(S)
 # Varianza delle osservazioni fissata
-sigma2 <- rep(0.01, n)
+sigma2 <- rep(0.01^2, n)
 # Iperparametri della prior dell'ultimo layer
 m0 <- 0; s02 <- 100
 # Uniforms' hyperparameters
 #   Following Page's idea in paragraph 2.5 I choose these hyperparams
-A_tau <- A_delta <- A_xi <- 10
+A_tau <- 1
+A_delta <- A_xi <- 10
 # Hyperparams for the Beta prior on alpha
 a_alpha <- b_alpha <- 1
 # Parametro di concentrazione del CRP
@@ -229,7 +230,7 @@ inizio <- Sys.time()
 
 for (d in 2:n_iter){ # Ciclo sulle iterazioni
   
-  if ((d %% 100) == 0) {cat(d, "\n")}
+  if ((d %% 100) == 0) {cat(d, difftime(Sys.time(), inizio), "\n")}
   
   for (j in 1:p){ # Ciclo sui coefficienti
     for (t in 1:T_final){ # Ciclo sugli istanti
@@ -439,6 +440,6 @@ for (d in 2:n_iter){ # Ciclo sulle iterazioni
 
 fine <- Sys.time()
 
-fine - inizio
+exec_time <- difftime(fine, inizio)
 
-# save.image("C:/Users/RomanoGi/Desktop/Bocconi/Ricerca/mort_rates-clustering/res/3rd_sim/3rd_sim_data.RData")
+save.image("C:/Users/RomanoGi/Desktop/Bocconi/Ricerca/mort_rates-clustering/res/5th_sim/5th_sim_data.RData")
