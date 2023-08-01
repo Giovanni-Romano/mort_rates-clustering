@@ -10,9 +10,9 @@ load("C:/Users/RomanoGi/Desktop/Bocconi/Ricerca/mort_rates-clustering/fit_indep.
 source("funzioni.R")
 
 Y <- rbind(ita_man = log(Y_ita_man / N_ita_man)[1:87, 1],
-           swe_man = log(Y_swe_man / N_swe_man)[1:87, 1],
+           us_man = log(Y_us_man / N_us_man)[1:87, 1],
            uk_man = log(Y_uk_man / N_uk_man)[1:87, 1],
-           us_man = log(Y_us_man / N_us_man)[1:87, 1])
+           swe_man = log(Y_swe_man / N_swe_man)[1:87, 1])
 rownames(Y) <- substr(rownames(Y), 1, 2)
 
 set.seed(1)
@@ -31,7 +31,8 @@ n <- nrow(Y); n
 m0 <- 0; s02 <- 100
 # Uniforms' hyperparameters
 #   Following Page's idea in paragraph 2.5 I choose these hyperparams
-A_tau <- A_delta <- 10
+A_tau <- 1
+A_delta <- 10
 # A_sigma <- 5
 sigma2_i <- rep(0.1^2, 4)
 # Hyperparams for the Beta prior on alpha
@@ -195,7 +196,7 @@ inizio <- Sys.time()
 for (d in 2:n_iter){ # Ciclo sulle iterazioni
   
   if ((d %% 50) == 0) {cat(d, Sys.time() - inizio, "\n")}
-  for (t in T_final:1){ # Ciclo sugli istanti
+  for (t in 1:T_final){ # Ciclo sugli istanti
     
     ### ### ### ### ### ### ####
     ### ### UPDATE GAMMA ### ###
@@ -344,8 +345,8 @@ for (d in 2:n_iter){ # Ciclo sulle iterazioni
            delta = delta_temp,
            m0 = m0,
            s02 = s02)
-
-
+  
+  
   ### ### ### ### ####
   ### UPDATE DELTA ###
   delta_res[d] <- delta_temp <-
@@ -354,7 +355,7 @@ for (d in 2:n_iter){ # Ciclo sulle iterazioni
                data = theta_temp,
                mean = phi_temp,
                hyppar = A_delta)
-
+  
   
   
   ### ### ### ### ####
@@ -383,9 +384,8 @@ for (d in 2:n_iter){ # Ciclo sulle iterazioni
   
 } # END OF FOR LOOP OVER ITERATIONS "d"
 
-
 fine <- Sys.time()
 
 exec_time <- fine - inizio; exec_time
 
-save.image("res/sim_only_infant/sigma_fixed/sigma_fixed.RData")
+# save.image("res/sim_only_infant/sigma_fixed/tau1/ita_us_uk_swe/ita_us_uk_swe.RData")
