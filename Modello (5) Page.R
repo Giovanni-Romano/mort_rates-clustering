@@ -9,10 +9,10 @@ load("C:/Users/RomanoGi/Desktop/Bocconi/Ricerca/BSP_Pavone/output/mortality.Rdat
 load("C:/Users/RomanoGi/Desktop/Bocconi/Ricerca/mort_rates-clustering/fit_indep.RData")
 source("funzioni.R")
 
-Y <- rbind(ita_man = log(Y_ita_man / N_ita_man)[1:87, 1],
-           us_man = log(Y_us_man / N_us_man)[1:87, 1],
+Y <- rbind(swe_man = log(Y_swe_man / N_swe_man)[1:87, 1],
            uk_man = log(Y_uk_man / N_uk_man)[1:87, 1],
-           swe_man = log(Y_swe_man / N_swe_man)[1:87, 1])
+           us_man = log(Y_us_man / N_us_man)[1:87, 1],
+           ita_man = log(Y_ita_man / N_ita_man)[1:87, 1])
 rownames(Y) <- substr(rownames(Y), 1, 2)
 
 set.seed(1)
@@ -388,4 +388,4 @@ fine <- Sys.time()
 
 exec_time <- fine - inizio; exec_time
 
-# save.image("res/sim_only_infant/sigma_fixed/tau1/ita_us_uk_swe/ita_us_uk_swe.RData")
+# save.image("res/sim_only_infant/sigma_fixed/tau1/swe_uk_us_ita/swe_uk_us_ita.RData")
