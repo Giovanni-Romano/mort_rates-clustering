@@ -72,7 +72,7 @@ n <- length(data_list_man); n
 # Dimensione stato latente (-> numero coeff)
 p <- ncol(S)
 # Varianza delle osservazioni fissata
-sigma2 <- rep(0.01^2, n)
+sigma2 <- rep(0.1^2, n)
 # Iperparametri della prior dell'ultimo layer
 m0 <- 0; s02 <- 100
 # Uniforms' hyperparameters
@@ -82,7 +82,7 @@ A_delta <- A_xi <- 10
 # Hyperparams for the Beta prior on alpha
 a_alpha <- b_alpha <- 1
 # Parametro di concentrazione del CRP
-M <- 3
+M <- 2
 
 
 
@@ -224,7 +224,8 @@ rm(j); rm(t)
 ### GIBBS SAMPLING ####
 ### ### ### ### ### ###
 # Ipotizzo di volerlo fare per gli uomini
-Y <- data_list_man
+Y <- lapply(data_list_man, function(y) y[1:87, ])
+names(Y) <- substr(names(data_list_man), 1, 2)
 
 inizio <- Sys.time()
 
