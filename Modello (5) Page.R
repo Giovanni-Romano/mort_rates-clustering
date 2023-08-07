@@ -278,7 +278,7 @@ for (d in 2:n_iter){ # Ciclo sulle iterazioni
                                               beta_cluster = beta_temp[[j]][, t],
                                               sigma2_i = sigma2[i],
                                               lab_t = labels_temp[[j]][,t],
-                                              lab_tp1 = labels_temp[[j]][,t], 
+                                              lab_tp1 = labels_temp[[j]][,t+1], 
                                               gamma_tp1 = if (t == T_final) {'last time'} 
                                               else {gamma_temp[[j]][, t+1]},
                                               newclustervalue = newclustervalue,
