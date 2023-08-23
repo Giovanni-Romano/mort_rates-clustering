@@ -1,9 +1,7 @@
-library(here)
-library(tidyverse)
-library(KFAS)
-library(mvtnorm)
-library(mvnfast)
-library(mggd)
+require(tidyverse)
+require(mvtnorm)
+require(mvnfast)
+require(mggd)
 
 
 #### ### ### ### ### ### ### ### ### ### ### ### ### ###
@@ -116,7 +114,7 @@ are.partitions.equal <- function(part1, part2){
 ### ### ### ### ### ##
 #### UPDATE GAMMA ####
 ### ### ### ### ### ##
-up_gamma_i <- function(i, gamma, alpha_t, lab_t, lab_tm1){
+up_gamma_i <- function(i, gamma, alpha_t, lab_t, lab_tm1, M){
   
   ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ###
   ### - gamma è il vettore gamma_{t} più recente, quindi alcune componenti
@@ -125,7 +123,7 @@ up_gamma_i <- function(i, gamma, alpha_t, lab_t, lab_tm1){
   ### - nota che rho_{t-1} sarà già aggiornato all'iter. (d) mentre rho_t è ancora
   ###     alla vecchia iter (d-1)
   
-  # R_t^{(+i)}: insieme di unità che rimangono fisse da t-1 a t
+  # R_t^{(+i)}: insieme di unità che rimangono fisse da t-1 a t unito a i
   R_t <- which(gamma == 1)
   R_tmi <- R_t[R_t != i]
   R_tpi <- c(R_tmi, i)
@@ -147,7 +145,7 @@ up_gamma_i <- function(i, gamma, alpha_t, lab_t, lab_tm1){
   # Trova insieme della partizione con dentro i
   j <- lab_t.R[i]
   n.R <- sum(lab_t.R > 0) - 1
-  n_j <- sum(lab_t.R == j)
+  n_j <- sum(lab_t.R == j); if (n_j < 1) {cat("errore n_j \n")}
   
   if (n.R == 0) { # se la partizione a cui ci condizioniamo è vuota
     ratio <- 1
@@ -179,7 +177,8 @@ up_label_i <- function(i,
                        beta_cluster,
                        sigma2_i,
                        lab_t, lab_tp1, gamma_tp1,
-                       newclustervalue) {
+                       newclustervalue,
+                       M) {
   
   ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ###
   ### - i: indice dell'unità che stiamo aggiornando
@@ -225,13 +224,20 @@ up_label_i <- function(i,
     
     # Nel paper di Page: Pr(c_it = h).
     # prob_cit <- dCRP(vapply(rho_t.h, length, FUN.VALUE = integer(1)), M)
-    prob_cit <- dCRP(tabulate(lab_t.h), M)
+    # prob_cit <- dCRP(tabulate(lab_t.h), M)
+    # prob_cit <- ifelse(h < max(whichclusters), sum(lab_tmi == h), M)
     
     # Nel paper di Page: N(Y_it | bla bla)
     if (h < max(whichclusters)){ # se il cluster è già esistente, devo usare il beta di quel cluster
       beta <- beta_cluster[h]
+      prob_cit <- sum(lab_tmi == h)
     } else { # se il cluster è nuovo, devo simulare la media dalla prior
-      beta <- newclustervalue
+      if (sum(lab_t == k) == 1){
+        beta <- beta_cluster[k]
+      } else{
+        beta <- newclustervalue
+      }
+      prob_cit <- M
     }
     
     # Nel paper di Page: indicatrice sulle partizioni ridotte
@@ -263,9 +269,10 @@ up_label_i <- function(i,
   # Almeno nelle prime iterazioni sembra che le prob siano tutte 0, 
   #   quindi devo lavorare in scala logaritmica. Per campionare dalle 
   #   log-prob uso il trick del max con la Gumbel.
-  lll <- logp + min(abs(min(logp)), .Machine$double.xmax)
-  gumbel <- -log(-log(runif(length(lll))))
-  lll <- lll + gumbel
+  # lll <- logp + min(abs(min(logp)), .Machine$double.xmax)
+  gumbel <- -log(-log(runif(length(logp))))
+  # lll <- lll + gumbel
+  lll <- logp + gumbel
   
   c_it <- whichclusters[which.max(lll)]
   return(c_it)
@@ -298,7 +305,7 @@ up_beta <- function(k, t,
   
   
   # Varianza a posteriori
-  var.post <- ( 1 / tau_t + sum(1/sigma2_vec))^(-1)
+  var.post <- ( 1 / tau_t + sum(1/sigma2_vec[obs]))^(-1)
   # Media a posteriori
   mean.post <- var.post * 
     ( sum( Y_t[obs]/sigma2_vec[obs] ) + theta_t / tau_t )
@@ -431,14 +438,12 @@ up_var.RWM <- function(val_now,
     likel_now <- sum(dnorm(data, 
                            mean = mean, 
                            sd = sqrt(val_now),
-                           log = TRUE),
-                     na.rm = TRUE) 
+                           log = TRUE))
     likel_prop <- sum(dnorm(data, 
                             mean = mean,
                             sd = sqrt(val_prop),
-                            log = TRUE),
-                      na.rm = TRUE)
-    logprob <- indicator + likel_prop - likel_now
+                            log = TRUE))
+    logprob <- min(indicator + likel_prop - likel_now, 0)
   } else {
     logprob <- -Inf
   }
