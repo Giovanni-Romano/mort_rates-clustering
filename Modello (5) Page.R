@@ -280,7 +280,7 @@ for (d in 2:n_iter){ # Ciclo sulle iterazioni
                                               beta_cluster = beta_temp[[j]][, t],
                                               sigma2_i = sigma2[i],
                                               lab_t = labels_temp[[j]][,t],
-                                              lab_tp1 = labels_temp[[j]][,t], 
+                                              lab_tp1 = labels_temp[[j]][,t+1], 
                                               gamma_tp1 = if (t == T_final) {'last time'} 
                                               else {gamma_temp[[j]][, t+1]},
                                               newclustervalue = newclustervalue,
@@ -443,4 +443,4 @@ fine <- Sys.time()
 
 exec_time <- difftime(fine, inizio)
 
-save.image("C:/Users/RomanoGi/Desktop/Bocconi/Ricerca/mort_rates-clustering/res/5th_sim/5th_sim_data.RData")
+# save.image("C:/Users/RomanoGi/Desktop/Bocconi/Ricerca/mort_rates-clustering/res/3rd_sim/3rd_sim_data.RData")
