@@ -1,6 +1,4 @@
-library(here)
 library(tidyverse)
-library(KFAS)
 library(mvtnorm)
 library(mvnfast)
 library(mggd)
@@ -125,7 +123,7 @@ up_gamma_i <- function(i, gamma, alpha_t, lab_t, lab_tm1){
   ### - nota che rho_{t-1} sarà già aggiornato all'iter. (d) mentre rho_t è ancora
   ###     alla vecchia iter (d-1)
   
-  # R_t^{(+i)}: insieme di unità che rimangono fisse da t-1 a t
+  # R_t^{(+i)}: insieme di unità che rimangono fisse da t-1 a t unito a i
   R_t <- which(gamma == 1)
   R_tmi <- R_t[R_t != i]
   R_tpi <- c(R_tmi, i)
@@ -225,26 +223,28 @@ up_label_i <- function(i, j,
   for (h in whichclusters){
     # Devo costruire la partizione con l'i-esima osservazione inserita
     #   nell'h-esimo cluster
-    # rho_t.h <- rho_tmi
-    # if (h < max(whichclusters)){ # se assegno ad un cluster già esistente
-    #   rho_t.h[[h]] <- c(rho_t.h[[h]], i) 
-    # } else { # se assegno al nuovo cluster
-    #   rho_t.h[[h]] <- i 
-    # }
     lab_t.h <- lab_tmi
     lab_t.h[i] <- h
     
-    # Nel paper di Page: Pr(c_it = h).
-    # prob_cit <- dCRP(vapply(rho_t.h, length, FUN.VALUE = integer(1)), M)
-    prob_cit <- dCRP(tabulate(lab_t.h), M)
-    
-    # Nel paper di Page: N(Y_it | bla bla).we
-    # Per me ci sarà il prodotto di Pr(Y_{ixt} |  beta, ecc) per tutti gli x.
+    # Nel paper di Page: Pr(c_it = h) e N(Y_it | bla bla).
     if (h < max(whichclusters)){ # se il cluster è già esistente, devo usare il beta di quel cluster
       beta <- beta_cluster[h]
-    } else { # se il cluster è nuovo, devo simulare la media dalla prior
-      beta <- newclustervalue
+      prob_cit <- sum(lab_tmi == h)
+    } else { # If the cluster to which i is assigned is an empty one..
+      # The procedure in Neal's paper is a bit different from the one used in Page: 
+      #   - Page always sample a new value from the prior
+      #   - Neal sample a new value only if the cluster is actually new, i.e.
+      #       if obs. i was a singleton before the update and now it is assigned
+      #       to an empty cluster, than that cluster is its old one, so the 
+      #       value of beta is the old one.
+      if (sum(lab_t == k) == 1){
+        beta <- beta_cluster[k]
+      } else{
+        beta <- newclustervalue
+      }
+      prob_cit <- M
     }
+    
     # I beta che devo usare sono il vettore beta_i, sostituendo
     #   per il j-esimo coeff. il beta che ho appena calcolato.
     #
@@ -256,28 +256,13 @@ up_label_i <- function(i, j,
       check <- TRUE
     } else {
       R_tp1 <- which(gamma_tp1 == 1)
-      # rho_tp1.R <- list()
-      # rho_t.h.R <- list()
+      
       lab_tp1.R <- rep(-1, length(lab_t))
       lab_t.h.R <- rep(-1, length(lab_t))
       
-      # for (kk in 1:length(rho_t.h)){
-      #   if (sum(rho_t.h[[kk]] %in% R_tp1) > 0){
-      #     rho_t.h.R[[length(rho_t.h.R) + 1]] <- rho_t.h[[kk]][rho_t.h[[kk]] %in% R_tp1]
-      #   }
-      # }
       lab_t.h.R[R_tp1] <- lab_t.h[R_tp1]
-      
-      # for (kkk in 1:length(rho_tp1)){
-      #   # Ho aggiunto il seguente "if" per non mettere vettori 
-      #   #   vuoti in rho_tp1.R
-      #   if (sum(rho_tp1[[kkk]] %in% R_tp1) > 0){
-      #     rho_tp1.R[[length(rho_tp1.R) + 1]] <- rho_tp1[[kkk]][rho_tp1[[kkk]] %in% R_tp1]
-      #   }
-      # }
       lab_tp1.R[R_tp1] <- lab_tp1[R_tp1]
       
-      # check <- are.partitions.equal(rho_t.h.R, rho_tp1.R)
       check <- all(lab_t.h.R == lab_tp1.R)
     }
     
@@ -286,7 +271,7 @@ up_label_i <- function(i, j,
                           mean = means,
                           sd = sqrt(sigma2_i),
                           log = TRUE))
-    # if (exp(logpnorm) > 0.01) {cat(exp(logpnorm), '\n')}
+    
     logp <- c(logp, 
               log(prob_cit) + logpnorm + log(check))
   }
@@ -295,9 +280,11 @@ up_label_i <- function(i, j,
   # Almeno nelle prime iterazioni sembra che le prob siano tutte 0, 
   #   quindi devo lavorare in scala logaritmica. Per campionare dalle 
   #   log-prob uso il trick del max con la Gumbel.
-  lll <- logp + min(abs(min(logp)), .Machine$double.xmax)
-  gumbel <- -log(-log(runif(length(lll))))
-  lll <- lll + gumbel
+  # lll <- logp + min(abs(min(logp)), .Machine$double.xmax)
+  # gumbel <- -log(-log(runif(length(lll))))
+  # lll <- lll + gumbel
+  gumbel <- -log(-log(runif(length(logp))))
+  lll <- logp + gumbel
   
   c_it <- whichclusters[which.max(lll)]
   return(c_it)
@@ -417,7 +404,9 @@ up_theta_jt <- function(beta_jt,
                                   priormean = phi_j,
                                   priorvar = delta_j)
   
-  out <- rnorm(1, postpar[1], sqrt(postpar[2]))
+  out <- rnorm(1, 
+               mean = postpar[1], 
+               sd = sqrt(postpar[2]))
   
   return(out)
 }
@@ -447,7 +436,9 @@ up_phi_j <- function(theta_j,
                                   priormean = lambda,
                                   priorvar = xi)
   
-  out <- rnorm(1, postpar[1], sqrt(postpar[2]))
+  out <- rnorm(1, 
+               mean = postpar[1], 
+               sd = sqrt(postpar[2]))
   
   return(out)
 }
@@ -481,57 +472,6 @@ up_lambda <- function(phi,
   
   return(out)
 }
-
-
-
-
-
-# ## ### ### ### ### #
-# #### UPDATE TAU ####
-# ## ### ### ### ### #
-# up_tau <- function(tau_now,
-#                    epsilon,
-#                    beta_t,
-#                    theta_t,
-#                    A_tau){
-#   ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ###
-#   ### - tau_now: vector w/ current values of tau_jt for all j
-#   ### - eps: RW step size
-#   ### - beta_t: n*p matrix of beta_{kjt} for all clusters k and for all coeff. j
-#   ### - theta_t: p-vector of theta_{jt} for all coeff.'s j
-#   ### - A_tau: hyperparam of prior on tau's
-#   
-#   # Sample proposed value
-#   tau_prop <- runif(ncol(beta_t), tau_now - eps, tau_now + eps)
-#   
-#   
-#   # Vector with prob's of acceptance
-#   
-#   # Indicator to check if proposed values are in the domain
-#   indicator <- log(as.integer(tau_prop > 0 & tau_prop < A_tau))
-#   
-#   # Likelihood of current values and proposed ones
-#   #   I have to transpose beta_t because R fills matrices by columns and beta_t
-#   #   is n*p and theta_t is p*1.
-#   likel_now <- rowSums(dnorm(t(beta_t), 
-#                              mean = theta_t, 
-#                              sd = sqrt(tau_now),
-#                              log = TRUE),
-#                        na.rm = TRUE) 
-#   likel_prop <- rowSums(dnorm(t(beta_t), 
-#                               mean = theta_t,
-#                               sd = sqrt(tau_prop),
-#                               log = TRUE),
-#                         na.rm = TRUE)
-#   logprob <- indicator + likel_now - likel_prop
-#   
-#   # Create output
-#   out <- tau_now
-#   # If prob. of accept. is >= than 1 (so log>=0), accept proposed value
-#   out[logprob >= 0] <- tau_prop[logprob >= 0]
-#   
-#   return(out)
-# }
 
 
 
@@ -577,7 +517,7 @@ up_var.RWM <- function(val_now,
                             sd = sqrt(val_prop),
                             log = TRUE),
                       na.rm = TRUE)
-    logprob <- indicator + likel_prop - likel_now
+    logprob <- min(indicator + likel_prop - likel_now, 0)
   } else {
     logprob <- -Inf
   }

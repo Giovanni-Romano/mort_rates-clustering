@@ -74,13 +74,13 @@ p <- ncol(S)
 # Varianza delle osservazioni fissata
 sigma2 <- rep(0.1^2, n)
 # Iperparametri della prior dell'ultimo layer
-m0 <- 0; s02 <- 100
+m0 <- -4; s02 <- 1^2
 # Uniforms' hyperparameters
 #   Following Page's idea in paragraph 2.5 I choose these hyperparams
 A_tau <- 1
-A_delta <- A_xi <- 10
+A_delta <- A_xi <- 1
 # Hyperparams for the Beta prior on alpha
-a_alpha <- b_alpha <- 1
+a_alpha <- 2; b_alpha <- 3
 # Parametro di concentrazione del CRP
 M <- 2
 
@@ -443,4 +443,4 @@ fine <- Sys.time()
 
 exec_time <- difftime(fine, inizio)
 
-# save.image("C:/Users/RomanoGi/Desktop/Bocconi/Ricerca/mort_rates-clustering/res/3rd_sim/3rd_sim_data.RData")
+save.image("C:/Users/RomanoGi/Desktop/Bocconi/Ricerca/mort_rates-clustering/res/20230823/res.RData")
