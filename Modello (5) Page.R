@@ -8,17 +8,24 @@ library(invgamma)
 
 
 # Valori da testare
-sigma2_i_val <- c(0.1^2, 5^2)
-A_tau_val <- c(1, 50)
-A_delta_val <- c(1, 50)
-m0_val <- c(0, -4, -10)
-s02_val <- c(0.1^2, 10^2)
-a_b_val <- rbind(c(1, 1), c(2, 3))
+# sigma2_i_val <- c(0.1^2, 5^2)
+# A_tau_val <- c(1, 50)
+# A_delta_val <- c(1, 50)
+# m0_val <- c(0, -4, -10)
+# s02_val <- c(0.1^2, 10^2)
+# a_b_val <- rbind(c(1, 1), c(2, 3))
+sigma2_i_val <- 0.1^2
+A_tau_val <- 1
+A_delta_val <- 1
+m0_val <- -4
+s02_val <- 0.1^2
+a_b_val <- rbind(c(2, 3))
 grid <- expand_grid(sigma2_i_val, A_tau_val, A_delta_val, 
                     m0_val, s02_val, a_b_val)
 grid <- as.matrix(grid)
 
-cl <- makeCluster(10, outfile = "Progress.txt")
+# cl <- makeCluster(10, outfile = "Progress.txt")
+cl <- makeCluster(1, outfile = "Progress.txt")
 registerDoParallel(cl)
 
 
@@ -188,7 +195,7 @@ out <- foreach(row=1:ng) %dopar% {
   
   
   theta_res[ , 1] <- theta_temp <- rnorm(T_final, 
-                                         mean = phi_temp, sd = sqrt(delta_temp))
+                                         mean = phi_temp, sd = delta_temp)
   tau_res[ , 1] <- tau_temp <- runif(T_final, 
                                      0, A_tau)
   
@@ -206,7 +213,7 @@ out <- foreach(row=1:ng) %dopar% {
     
     beta_res[1:max(lab), t, 1] <- beta_temp[1:max(lab), t] <- 
       rnorm(max(lab),
-            mean = theta_temp[t], sd = sqrt(tau_temp[t]))
+            mean = theta_temp[t], sd = tau_temp[t])
   }
   rm(t)
   
@@ -256,7 +263,7 @@ out <- foreach(row=1:ng) %dopar% {
         # Campiono possibile nuovo valore per beta
         newclustervalue <- rnorm(1, 
                                  mean = theta_temp[t], 
-                                 sd = sqrt(tau_temp[t]))
+                                 sd = tau_temp[t])
         
         
         # Non assegno qua anche a labels_res perché dovrò prima sistemarlo
@@ -350,7 +357,7 @@ out <- foreach(row=1:ng) %dopar% {
       
       ### ### ### ### ###
       ### UPDATE TAU ###
-      tau_temp[t] <- up_var.RWM(val_now = tau_temp[t],
+      tau_temp[t] <- up_sd.RWM(val_now = tau_temp[t],
                                 eps = eps_tau,
                                 data = beta_temp[, t][!is.na(beta_temp[, t])],
                                 mean = theta_temp[t],
@@ -379,7 +386,7 @@ out <- foreach(row=1:ng) %dopar% {
     ### ### ### ### ####
     ### UPDATE DELTA ###
     delta_res[d] <- delta_temp <-
-      up_var.RWM(val_now = delta_temp,
+      up_sd.RWM(val_now = delta_temp,
                  eps = eps_delta,
                  data = theta_temp,
                  mean = phi_temp,
@@ -452,7 +459,7 @@ out <- foreach(row=1:ng) %dopar% {
                     up_theta = up_theta_t,
                     up_phi = up_phi,
                     up_alpha = up_alpha,
-                    up_var = up_var.RWM)
+                    up_sd = up_sd.RWM)
   
   data <- list(Y = Y,
                gender = "man")
@@ -496,7 +503,7 @@ out <- foreach(row=1:ng) %dopar% {
                     up_theta = up_theta_t,
                     up_phi = up_phi,
                     up_alpha = up_alpha,
-                    up_var = up_var.RWM)
+                    up_sd = up_sd.RWM)
   
   data <- list(Y = Y,
                gender = "man")

@@ -305,10 +305,10 @@ up_beta <- function(k, t,
   
   
   # Varianza a posteriori
-  var.post <- ( 1 / tau_t + sum(1/sigma2_vec[obs]))^(-1)
+  var.post <- ( 1 / tau_t^2 + sum(1/sigma2_vec[obs]))^(-1)
   # Media a posteriori
   mean.post <- var.post * 
-    ( sum( Y_t[obs]/sigma2_vec[obs] ) + theta_t / tau_t )
+    ( sum( Y_t[obs]/sigma2_vec[obs] ) + theta_t / tau_t^2 )
   
   beta_updated <- rnorm(1, mean = mean.post, sd = sqrt(var.post))
   
@@ -358,9 +358,9 @@ up_theta_t <- function(beta_t,
   
   postpar <- GaussGaussUpdate_iid(xbar = xbar,
                                   n = n,
-                                  datavar = tau_t,
+                                  datavar = tau_t^2,
                                   priormean = phi,
-                                  priorvar = delta)
+                                  priorvar = delta^2)
   
   out <- rnorm(1, 
                mean = postpar[1], 
@@ -390,7 +390,7 @@ up_phi <- function(theta,
   
   postpar <- GaussGaussUpdate_iid(xbar = xbar,
                                   n = n,
-                                  datavar = delta,
+                                  datavar = delta^2,
                                   priormean = m0,
                                   priorvar = s02)
   
@@ -405,16 +405,16 @@ up_phi <- function(theta,
 
 
 
-### ### ### ### ### ### ##
-#### UPDATE VARIANCES ####
-### ### ### ### ### ### ##
+### ### ### ### ### ### ###
+#### UPDATE STAND. DEV. ####
+### ### ### ### ### ### ###
 # Function for the RW Metropolis (RWM) for tau, delta and xi
 # It is written to update one param. at a time
-up_var.RWM <- function(val_now,
-                       eps,
-                       data,
-                       mean,
-                       hyppar){
+up_sd.RWM <- function(val_now,
+                      eps,
+                      data,
+                      mean,
+                      hyppar){
   ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ###
   ### - val_now: vector w/ current value of tau_t/delta
   ### - eps: RW step size
@@ -437,13 +437,13 @@ up_var.RWM <- function(val_now,
     # Likelihood of current value and proposed one
     likel_now <- sum(dnorm(data, 
                            mean = mean, 
-                           sd = sqrt(val_now),
+                           sd = val_now,
                            log = TRUE))
     likel_prop <- sum(dnorm(data, 
                             mean = mean,
-                            sd = sqrt(val_prop),
+                            sd = val_prop,
                             log = TRUE))
-    logprob <- min(indicator + likel_prop - likel_now, 0)
+    logprob <- min(likel_prop - likel_now, 0)
   } else {
     logprob <- -Inf
   }
