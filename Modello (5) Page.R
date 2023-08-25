@@ -93,7 +93,7 @@ M <- 2
 ### ### ### ### ### ### ### ### ### ###
 
 # Numero iterazioni
-n_iter <- 5000
+n_iter <- 2000
 # RW step sizes
 #   I've done some diagnostics and it seems that the best thing to do is to 
 #   to pick a large stepsize, so I set it equal to the size of the domain
@@ -191,12 +191,12 @@ for (j in 1:p){
   delta_res[[j]][1] <- delta_temp[[j]] <- 
     runif(1, 0, A_delta)
   phi_res[[j]][1] <- phi_temp[[j]] <- 
-    rnorm(1, lambda_temp, sqrt(xi_temp))
+    rnorm(1, lambda_temp, xi_temp)
   
   alpha_res[[j]][1] <- alpha_temp[[j]] <- rbeta(1, a_alpha, b_alpha)
   
   theta_res[[j]][ , 1] <- theta_temp[[j]] <- 
-    rnorm(T_final, phi_temp[[j]], sqrt(delta_temp[[j]]))
+    rnorm(T_final, phi_temp[[j]], delta_temp[[j]])
   tau_res[[j]][ , 1] <- tau_temp[[j]] <- 
     runif(T_final, 0, A_tau)
   
@@ -211,7 +211,7 @@ for (j in 1:p){
     labels_temp[[j]][, t] <- labels_res[[j]][, t, 1] <- lab
     beta_res[[j]][1:max(lab), t, 1] <- beta_temp[[j]][1:max(lab), t] <- 
       rnorm(max(lab),
-            mean = theta_temp[[j]][t], sd = sqrt(tau_temp[[j]][t]))
+            mean = theta_temp[[j]][t], sd = tau_temp[[j]][t])
   }
 }
 
@@ -269,7 +269,7 @@ for (d in 2:n_iter){ # Ciclo sulle iterazioni
         
         
         # Campiono possibile nuovo valore per beta
-        newclustervalue <- rnorm(1, theta_temp[[j]][t], sqrt(tau_temp[[j]][t]))
+        newclustervalue <- rnorm(1, theta_temp[[j]][t], tau_temp[[j]][t])
         
         
         # Non assegno qua anche a labels_res perché dovrò prima sistemarlo
@@ -374,7 +374,7 @@ for (d in 2:n_iter){ # Ciclo sulle iterazioni
       
       ### ### ### ### ###
       ### UPDATE TAU ###
-      tau_temp[[j]][t] <- up_var.RWM(val_now = tau_temp[[j]][t],
+      tau_temp[[j]][t] <- up_sd.RWM(val_now = tau_temp[[j]][t],
                                      eps = eps_tau,
                                      data = beta_temp[[j]][, t],
                                      mean = theta_temp[[j]][t],
@@ -403,11 +403,11 @@ for (d in 2:n_iter){ # Ciclo sulle iterazioni
     ### ### ### ### ####
     ### UPDATE DELTA ###
     delta_res[[j]][d] <- delta_temp[[j]] <- 
-      up_var.RWM(val_now = delta_temp[[j]],
-                 eps = eps_delta,
-                 data = theta_temp[[j]],
-                 mean = phi_temp[[j]],
-                 hyppar = A_delta)
+      up_sd.RWM(val_now = delta_temp[[j]],
+                eps = eps_delta,
+                data = theta_temp[[j]],
+                mean = phi_temp[[j]],
+                hyppar = A_delta)
     
     ### ### ### ### ####
     ### UPDATE ALPHA ###
@@ -430,11 +430,11 @@ for (d in 2:n_iter){ # Ciclo sulle iterazioni
   ### ### ### ### ####
   ### UPDATE XI ###
   xi_res[d] <- xi_temp <- 
-    up_var.RWM(val_now = xi_temp,
-               eps = eps_xi,
-               data = unlist(phi_temp),
-               mean = lambda_temp,
-               hyppar = A_xi)
+    up_sd.RWM(val_now = xi_temp,
+              eps = eps_xi,
+              data = unlist(phi_temp),
+              mean = lambda_temp,
+              hyppar = A_xi)
   
   
 } # END OF FOR LOOP OVER ITERATIONS "d"

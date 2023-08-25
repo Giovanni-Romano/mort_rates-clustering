@@ -345,11 +345,11 @@ up_beta <- function(j, k, t,
   
   
   # Varianza a posteriori
-  var.post <- ( 1 / tau_jt + sum(1/sigma2_vec)*sum(spline_basis[, j]^2) )^(-1)
+  var.post <- ( 1 / tau_jt^2 + sum(1/sigma2_vec)*sum(spline_basis[, j]^2) )^(-1)
   # Media a posteriori
   mean.post <- var.post * 
     ( sum( t(t(Y_t.tilde)*spline_basis[ , j])/sigma2_vec ) + 
-        theta_jt / tau_jt )
+        theta_jt / tau_jt^2 )
   # Devo fare il doppio trasposto per sfruttare bene il prodotto element-wise
   
   beta_updated <- rnorm(1, mean = mean.post, sd = sqrt(var.post))
@@ -400,9 +400,9 @@ up_theta_jt <- function(beta_jt,
   
   postpar <- GaussGaussUpdate_iid(xbar = xbar,
                                   n = n,
-                                  datavar = tau_jt,
+                                  datavar = tau_jt^2,
                                   priormean = phi_j,
-                                  priorvar = delta_j)
+                                  priorvar = delta_j^2)
   
   out <- rnorm(1, 
                mean = postpar[1], 
@@ -432,9 +432,9 @@ up_phi_j <- function(theta_j,
   
   postpar <- GaussGaussUpdate_iid(xbar = xbar,
                                   n = n,
-                                  datavar = delta_j,
+                                  datavar = delta_j^2,
                                   priormean = lambda,
-                                  priorvar = xi)
+                                  priorvar = xi^2)
   
   out <- rnorm(1, 
                mean = postpar[1], 
@@ -464,7 +464,7 @@ up_lambda <- function(phi,
   
   postpar <- GaussGaussUpdate_iid(xbar = xbar,
                                   n = n,
-                                  datavar = xi,
+                                  datavar = xi^2,
                                   priormean = m0,
                                   priorvar = s02)
   
@@ -482,7 +482,7 @@ up_lambda <- function(phi,
 ### ### ### ### ### ### ##
 # Function for the RW Metropolis (RWM) for tau, delta and xi
 # It is written to update one param. at a time
-up_var.RWM <- function(val_now,
+up_sd.RWM <- function(val_now,
                    eps,
                    data,
                    mean,
@@ -509,15 +509,15 @@ up_var.RWM <- function(val_now,
     # Likelihood of current value and proposed one
     likel_now <- sum(dnorm(data, 
                            mean = mean, 
-                           sd = sqrt(val_now),
+                           sd = val_now,
                            log = TRUE),
                      na.rm = TRUE) 
     likel_prop <- sum(dnorm(data, 
                             mean = mean,
-                            sd = sqrt(val_prop),
+                            sd = val_prop,
                             log = TRUE),
                       na.rm = TRUE)
-    logprob <- min(indicator + likel_prop - likel_now, 0)
+    logprob <- min(likel_prop - likel_now, 0)
   } else {
     logprob <- -Inf
   }
