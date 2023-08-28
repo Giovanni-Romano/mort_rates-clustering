@@ -78,7 +78,8 @@ m0 <- -4; s02 <- 1^2
 # Uniforms' hyperparameters
 #   Following Page's idea in paragraph 2.5 I choose these hyperparams
 A_tau <- 1
-A_delta <- A_xi <- 1
+A_delta <- 1
+A_xi <- 1
 # Hyperparams for the Beta prior on alpha
 a_alpha <- 2; b_alpha <- 3
 # Parametro di concentrazione del CRP
@@ -93,7 +94,7 @@ M <- 2
 ### ### ### ### ### ### ### ### ### ###
 
 # Numero iterazioni
-n_iter <- 2000
+n_iter <- 5000
 # RW step sizes
 #   I've done some diagnostics and it seems that the best thing to do is to 
 #   to pick a large stepsize, so I set it equal to the size of the domain
@@ -189,7 +190,7 @@ lambda_res[1] <- lambda_temp <-
 
 for (j in 1:p){
   delta_res[[j]][1] <- delta_temp[[j]] <- 
-    runif(1, 0, A_delta)
+    runif(1, 0.1, A_delta)
   phi_res[[j]][1] <- phi_temp[[j]] <- 
     rnorm(1, lambda_temp, xi_temp)
   
@@ -198,7 +199,7 @@ for (j in 1:p){
   theta_res[[j]][ , 1] <- theta_temp[[j]] <- 
     rnorm(T_final, phi_temp[[j]], delta_temp[[j]])
   tau_res[[j]][ , 1] <- tau_temp[[j]] <- 
-    runif(T_final, 0, A_tau)
+    runif(T_final, 0.1, A_tau)
   
   
   # Per ora inizializzo tutti i gamma = 0, così da lasciare piena libertà di 
@@ -231,7 +232,8 @@ inizio <- Sys.time()
 
 for (d in 2:n_iter){ # Ciclo sulle iterazioni
   
-  if ((d %% 100) == 0) {cat(d, difftime(Sys.time(), inizio), "\n")}
+  if ((d %% 100) == 0) {cat(d, difftime(Sys.time(), inizio), 
+                            as.character(Sys.time()), "\n")}
   
   for (j in 1:p){ # Ciclo sui coefficienti
     for (t in 1:T_final){ # Ciclo sugli istanti
@@ -443,4 +445,4 @@ fine <- Sys.time()
 
 exec_time <- difftime(fine, inizio)
 
-save.image("C:/Users/RomanoGi/Desktop/Bocconi/Ricerca/mort_rates-clustering/res/20230823/res.RData")
+save.image("C:/Users/RomanoGi/Desktop/Bocconi/Ricerca/mort_rates-clustering/res/uniform_prior_on_sd_2.RData")
