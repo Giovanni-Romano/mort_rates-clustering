@@ -8,24 +8,24 @@ library(invgamma)
 
 
 # Valori da testare
-# sigma2_i_val <- c(0.1^2, 5^2)
-# A_tau_val <- c(1, 50)
-# A_delta_val <- c(1, 50)
-# m0_val <- c(0, -4, -10)
-# s02_val <- c(0.1^2, 10^2)
-# a_b_val <- rbind(c(1, 1), c(2, 3))
-sigma2_i_val <- 0.1^2
-A_tau_val <- 1
-A_delta_val <- 1
-m0_val <- -4
-s02_val <- 0.1^2
-a_b_val <- rbind(c(2, 3))
+sigma2_i_val <- c(0.1^2, 5^2)
+A_tau_val <- c(1, 50)
+A_delta_val <- c(1, 50)
+m0_val <- c(0, -4, -10)
+s02_val <- c(0.1^2, 10^2)
+a_b_val <- rbind(c(1, 1), c(2, 3))
+# sigma2_i_val <- 0.1^2
+# A_tau_val <- 1
+# A_delta_val <- 1
+# m0_val <- -4
+# s02_val <- 0.1^2
+# a_b_val <- rbind(c(2, 3))
 grid <- expand_grid(sigma2_i_val, A_tau_val, A_delta_val, 
                     m0_val, s02_val, a_b_val)
 grid <- as.matrix(grid)
 
-# cl <- makeCluster(10, outfile = "Progress.txt")
-cl <- makeCluster(1, outfile = "Progress.txt")
+cl <- makeCluster(8, outfile = "res/sim_only_infant/unif_prior_on_sd/Progress.txt")
+# cl <- makeCluster(1, outfile = "Progress.txt")
 registerDoParallel(cl)
 
 
@@ -189,7 +189,7 @@ out <- foreach(row=1:ng) %dopar% {
                                       a_alpha, b_alpha)
   
   delta_res[1] <- delta_temp <-runif(1, 
-                                     0, A_delta)
+                                     0.1, A_delta)
   phi_res[1] <- phi_temp <- rnorm(1, 
                                   mean = m0, sd = sqrt(s02))
   
@@ -197,7 +197,7 @@ out <- foreach(row=1:ng) %dopar% {
   theta_res[ , 1] <- theta_temp <- rnorm(T_final, 
                                          mean = phi_temp, sd = delta_temp)
   tau_res[ , 1] <- tau_temp <- runif(T_final, 
-                                     0, A_tau)
+                                     0.1, A_tau)
   
   
   # Per ora inizializzo tutti i gamma = 0, così da lasciare piena libertà di 
@@ -514,4 +514,5 @@ out <- foreach(row=1:ng) %dopar% {
 }
 
 
-stop(cl)
+stopCluster(cl)
+save.image("res/sim_only_infant/unif_prior_on_sd/comparisons_hyppar.RData")
