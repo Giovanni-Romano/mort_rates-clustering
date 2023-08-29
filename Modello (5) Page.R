@@ -6,7 +6,7 @@ library(tidyverse)
 library(invgamma)
 
 load("C:/Users/RomanoGi/Desktop/Bocconi/Ricerca/BSP_Pavone/output/mortality.Rdata")
-load("fit_indep.Rdata")
+load("C:/Users/RomanoGi/Desktop/Bocconi/Ricerca/mort_rates-clustering/fit_indep.RData")
 source("funzioni.R")
 
 data_list_man <- list(ita_man = log(Y_ita_man / N_ita_man),
@@ -71,14 +71,17 @@ T_final
 n <- length(data_list_man); n
 # Dimensione stato latente (-> numero coeff)
 p <- ncol(S)
+# Varianza delle osservazioni fissata
+sigma2 <- rep(0.1^2, n)
 # Iperparametri della prior dell'ultimo layer
-m0 <- 0; s02 <- 1 
+m0 <- -4; s02 <- 1^2
 # Uniforms' hyperparameters
 #   Following Page's idea in paragraph 2.5 I choose these hyperparams
-A_sigma <- 5
-A_tau <- A_delta <- A_xi <- 10
+A_tau <- 1
+A_delta <- 1
+A_xi <- 1
 # Hyperparams for the Beta prior on alpha
-a_alpha <- b_alpha <- 1
+a_alpha <- 2; b_alpha <- 3
 # Parametro di concentrazione del CRP
 M <- 2
 
@@ -91,14 +94,13 @@ M <- 2
 ### ### ### ### ### ### ### ### ### ###
 
 # Numero iterazioni
-n_iter <- 2000
+n_iter <- 5000
 # RW step sizes
 #   I've done some diagnostics and it seems that the best thing to do is to 
 #   to pick a large stepsize, so I set it equal to the size of the domain
 eps_tau <- A_tau
 eps_delta <- A_delta
 eps_xi <- A_xi
-eps_sigma <- A_sigma
 
 
 
@@ -154,12 +156,6 @@ alpha_res <- replicate(p,
 
 lambda_res <- xi_res <- rep(NA, n_iter)
 
-sigma_res <- array(NA,
-                   dim = c(n, # numero osservazioni
-                           n_iter # numero iterazioni
-                           )
-                   )
-
 
 # Temp objects
 gamma_temp <- labels_temp <-
@@ -181,15 +177,12 @@ theta_temp <- tau_temp <- replicate(p,
 phi_temp <- delta_temp <- replicate(p, list(NA))
 alpha_temp <- replicate(p, list(NA))
 lambda_temp <- xi_temp <- NA
-sigma_temp <- rep(NA, n)
 
 
 
 ### ### ### ### ### ###
 ### Inizializzazioni ##
 ### ### ### ### ### ###
-sigma_res[, 1] <- sigma_temp <- runif(n, 0, A_sigma)
-  
 xi_res[1] <- xi_temp <- 
   runif(1, 0, A_xi)
 lambda_res[1] <- lambda_temp <- 
@@ -197,16 +190,16 @@ lambda_res[1] <- lambda_temp <-
 
 for (j in 1:p){
   delta_res[[j]][1] <- delta_temp[[j]] <- 
-    runif(1, 0, A_delta)
+    runif(1, 0.1, A_delta)
   phi_res[[j]][1] <- phi_temp[[j]] <- 
-    rnorm(1, lambda_temp, sqrt(xi_temp))
+    rnorm(1, lambda_temp, xi_temp)
   
   alpha_res[[j]][1] <- alpha_temp[[j]] <- rbeta(1, a_alpha, b_alpha)
   
   theta_res[[j]][ , 1] <- theta_temp[[j]] <- 
     rnorm(T_final, phi_temp[[j]], delta_temp[[j]])
   tau_res[[j]][ , 1] <- tau_temp[[j]] <- 
-    runif(T_final, 0, A_tau)
+    runif(T_final, 0.1, A_tau)
   
   
   # Per ora inizializzo tutti i gamma = 0, così da lasciare piena libertà di 
@@ -226,36 +219,26 @@ for (j in 1:p){
 rm(j); rm(t)
 
 
-inizio <- Sys.time()
 
 
 ### ### ### ### ### ###
 ### GIBBS SAMPLING ####
 ### ### ### ### ### ###
 # Ipotizzo di volerlo fare per gli uomini
-Y <- data_list_man
+Y <- lapply(data_list_man, function(y) y[1:87, ])
+names(Y) <- substr(names(data_list_man), 1, 2)
 
+inizio <- Sys.time()
 
 for (d in 2:n_iter){ # Ciclo sulle iterazioni
   
-  if ((d %% 50) == 0) {cat(d, "\n")}
+  if ((d %% 100) == 0) {cat(d, difftime(Sys.time(), inizio), 
+                            as.character(Sys.time()), "\n")}
   
   for (j in 1:p){ # Ciclo sui coefficienti
     for (t in 1:T_final){ # Ciclo sugli istanti
       ### ### ### ### ### ### ####
       ### ### UPDATE GAMMA ### ###
-      # Recupero le partizioni al tempo t, t-1 e t+1.
-      #   Lo faccio qui perché è uguale per tutte le osservazioni i e
-      #   lo userò anche dopo per l'update delle labels.
-      # Se t==1 non mi serve rho_tm1 perché non devo fare il confronto
-      #   di compatibilità.
-      if (t > 1){
-        rho_tm1 <- lab2rho(labels_temp[[j]][, t-1])
-      }
-      rho_t <- lab2rho(labels_temp[[j]][, t])
-      if (t < T_final){
-        rho_tp1 <- lab2rho(labels_temp[[j]][, t+1])
-      }
       
       for (i in 1:n){ # Ciclo sulle osservazioni per gamma
         # Potrei direttamente saltare il caso t==1 perché tanto
@@ -270,8 +253,8 @@ for (d in 2:n_iter){ # Ciclo sulle iterazioni
           gamma_temp[[j]][i, t] <- up_gamma_i(i = i, 
                                               gamma = gamma_temp[[j]][, t], 
                                               alpha_t = alpha_temp[[j]],
-                                              rho_t = rho_t,
-                                              rho_tm1 = rho_tm1)
+                                              lab_t = labels_temp[[j]][, t],
+                                              lab_tm1 = labels_temp[[j]][, t-1])
         }
       } # Fine ciclo sulle osservazioni per gamma
       
@@ -297,9 +280,9 @@ for (d in 2:n_iter){ # Ciclo sulle iterazioni
                                               Y_it = Y[[i]][t, ],
                                               beta_i = beta_actual,
                                               beta_cluster = beta_temp[[j]][, t],
-                                              sigma2_i = sigma_temp[i],
-                                              rho_t = lab2rho(labels_temp[[j]][,t]),
-                                              rho_tp1 = lab2rho(labels_temp[[j]][,t]), 
+                                              sigma2_i = sigma2[i],
+                                              lab_t = labels_temp[[j]][,t],
+                                              lab_tp1 = labels_temp[[j]][,t+1], 
                                               gamma_tp1 = if (t == T_final) {'last time'} 
                                               else {gamma_temp[[j]][, t+1]},
                                               newclustervalue = newclustervalue,
@@ -373,7 +356,7 @@ for (d in 2:n_iter){ # Ciclo sulle iterazioni
                                                          FUN.VALUE = double(4)),
                                         theta_jt = theta_temp[[j]][t], 
                                         tau_jt = tau_temp[[j]][t],
-                                        sigma2_vec = sigma_temp,
+                                        sigma2_vec = sigma2,
                                         labels_t = vapply(labels_temp, 
                                                           function(lab) lab[, t], 
                                                           FUN.VALUE = double(4)),
@@ -393,7 +376,7 @@ for (d in 2:n_iter){ # Ciclo sulle iterazioni
       
       ### ### ### ### ###
       ### UPDATE TAU ###
-      tau_temp[[j]][t] <- up_var.RWM(val_now = tau_temp[[j]][t],
+      tau_temp[[j]][t] <- up_sd.RWM(val_now = tau_temp[[j]][t],
                                      eps = eps_tau,
                                      data = beta_temp[[j]][, t],
                                      mean = theta_temp[[j]][t],
@@ -422,11 +405,11 @@ for (d in 2:n_iter){ # Ciclo sulle iterazioni
     ### ### ### ### ####
     ### UPDATE DELTA ###
     delta_res[[j]][d] <- delta_temp[[j]] <- 
-      up_var.RWM(val_now = delta_temp[[j]],
-                 eps = eps_delta,
-                 data = theta_temp[[j]],
-                 mean = phi_temp[[j]],
-                 hyppar = A_delta)
+      up_sd.RWM(val_now = delta_temp[[j]],
+                eps = eps_delta,
+                data = theta_temp[[j]],
+                mean = phi_temp[[j]],
+                hyppar = A_delta)
     
     ### ### ### ### ####
     ### UPDATE ALPHA ###
@@ -449,18 +432,17 @@ for (d in 2:n_iter){ # Ciclo sulle iterazioni
   ### ### ### ### ####
   ### UPDATE XI ###
   xi_res[d] <- xi_temp <- 
-    up_var.RWM(val_now = xi_temp,
-               eps = eps_xi,
-               data = unlist(phi_temp),
-               mean = lambda_temp,
-               hyppar = A_xi)
+    up_sd.RWM(val_now = xi_temp,
+              eps = eps_xi,
+              data = unlist(phi_temp),
+              mean = lambda_temp,
+              hyppar = A_xi)
   
   
 } # END OF FOR LOOP OVER ITERATIONS "d"
 
-
 fine <- Sys.time()
 
-fine - inizio
+exec_time <- difftime(fine, inizio)
 
-# save.image("C:/Users/RomanoGi/Desktop/Bocconi/Ricerca/mort_rates-clustering/1st_sim_data.RData")
+save.image("C:/Users/RomanoGi/Desktop/Bocconi/Ricerca/mort_rates-clustering/res/uniform_prior_on_sd_2.RData")

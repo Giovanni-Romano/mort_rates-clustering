@@ -1,8 +1,7 @@
+rm(list = ls())
 library(ggplot2)
 library(reshape2)
 library(dplyr)
-
-load("C:/Users/RomanoGi/Desktop/Bocconi/Ricerca/mort_rates-clustering/1st_sim_data.RData")
 
 theme_set(
   theme_light() +
@@ -14,7 +13,7 @@ theme_set(
 )
 
 
-burn_in <- 1:500
+burn_in <- 1:1000
 
 
 
@@ -87,25 +86,30 @@ windows(); pl55
 
 
 
-# Point estimate of partitions through SALSO
-library(salso)
-est_clust <- lapply(labels_res, 
-                    function(x)
-                      apply(x[ , , -burn_in], 2, 
-                            function(y)
-                              salso(x = t(y),
-                                    loss = binder(a = NULL),
-                                    maxNClusters = 4,
-                                    maxZealousAttempts = 10,
-                                    nRuns = 11,
-                                    nCores = 11
-                                    )
-                            )
-                    )
-str(est_clust)
+# Plot of betas
+est_clust_infant <- est_clust[[1]]
+colnames(est_clust_infant) <- (1933:2019)
+rownames(est_clust_infant) <- names(Y)
 
-# Non mettendo "a = NULL" in binder() venivano tutte partizioni con un 
-#   solo cluster.
-lapply(est_clust, function(x) apply(x, 2, function(y) length(unique(y))))
+beta1_mean <- rowMeans(beta_res[[1]][1, , ])
+beta2_mean <- rowMeans(beta_res[[1]][2, , ], na.rm = T)
+beta3_mean <- rowMeans(beta_res[[1]][3, , ], na.rm = T)
+beta4_mean <- rowMeans(beta_res[[1]][4, , ], na.rm = T)
 
+beta_mean <- cbind(beta1_mean, beta2_mean, beta3_mean, beta4_mean)
+
+beta_it <- beta_mean[cbind(1:87, est_clust_infant[1, ])] 
+beta_sw <- beta_mean[cbind(1:87, est_clust_infant[2, ])]
+beta_uk <- beta_mean[cbind(1:87, est_clust_infant[3, ])]
+beta_us <- beta_mean[cbind(1:87, est_clust_infant[4, ])]
+
+windows()
+plot(1933:2019, beta_it, type = 'b', pch = 0,
+     xlab = "Year", ylab = "", 
+     main = "Values of splines' coeff. for Infant")
+lines(1933:2019, beta_sw, type = 'b', col = 2, pch = 1)
+lines(1933:2019, beta_uk, type = 'l', col = 7)
+lines(1933:2019, beta_us, type = 'b', col = 4, pch = 8)
+legend("topright", legend = c("it", "sw", "uk", "us"),
+       col = c(1, 2, 7, 4), pch = c(0, 1, 15, 8))
 
