@@ -176,7 +176,7 @@ up_label_i <- function(i, j,
                        Y_it,
                        beta_i,
                        beta_cluster,
-                       sigma2_i,
+                       sigma_i,
                        lab_t, lab_tp1, gamma_tp1,
                        newclustervalue,
                        spline_basis) {
@@ -187,16 +187,13 @@ up_label_i <- function(i, j,
   ### - Y_it: vettore con Y_{ixt} per ogni x
   ### - beta_i: vettore con i beta dell'osservazione i-esima al tempo t
   ### - beta_cluster: vettore con i beta dei cluster del j-esimo coeff. al tempo t
-  ### - sigma2_i: varianza dell'i-esima osservazione
+  ### - sigma_i: sd dell'i-esima osservazione
   ### - rho_t: partizione al tempo t PER IL COEFF j
   ### - rho_tp1: partizione al tempo t+1 PER IL COEFF j
   ### - gamma_tp1: gamma_{t+1}, per trovare la partizione ridotta;
   ###               all'istante finale passare 'last time'
   ### - newclustevalue: valore per il nuovo cluster
   ### - spline_basis: matrice con i valori delle basi spline
-  
-  # Inizializzazione vettore probabilità della multinomiale
-  logp <- c()
   
   # Cluster in cui è l'i-esima osservazione
   # k <- which(vapply(rho_t, is.element, el = i, FUN.VALUE = FALSE))
@@ -219,6 +216,11 @@ up_label_i <- function(i, j,
   #   whichcluster[which.max(lll)], quindi l'importante è che ci sia corrispondenza
   #   tra l'ordine di whichcluster e quello di lll (cosa che succede visto come
   #   è creato logp)
+  
+  means <- drop(spline_basis[, -j] %*% beta_i[-j])
+  means_list <- c()
+  prob_cit_list <- c()
+  check_list <- c()
   
   for (h in whichclusters){
     # Devo costruire la partizione con l'i-esima osservazione inserita
@@ -266,16 +268,19 @@ up_label_i <- function(i, j,
       check <- all(lab_t.h.R == lab_tp1.R)
     }
     
-    means <- drop(spline_basis %*% beta_i)
-    logpnorm <- sum(dnorm(Y_it, 
-                          mean = means,
-                          sd = sqrt(sigma2_i),
-                          log = TRUE))
+    means_list <- cbind(means_list, means + beta*spline_basis[, j])
+    prob_cit_list <- c(prob_cit_list, prob_cit)
+    check_list <- c(check_list, check)
     
-    logp <- c(logp, 
-              log(prob_cit) + logpnorm + log(check))
   }
   
+  
+  logpnorm_list <- colSums(dnorm(Y_it, 
+                                 mean = means_list,
+                                 sd = sigma_i,
+                                 log = TRUE))
+  
+  logp <- log(prob_cit_list) + logpnorm_list + log(check_list)
   
   # Almeno nelle prime iterazioni sembra che le prob siano tutte 0, 
   #   quindi devo lavorare in scala logaritmica. Per campionare dalle 
@@ -302,7 +307,7 @@ up_beta <- function(j, k, t,
                     Y_t,
                     beta_t,
                     theta_jt, tau_jt,
-                    sigma2_vec,
+                    sigma_vec,
                     labels_t,
                     spline_basis){
   ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ###
@@ -313,7 +318,7 @@ up_beta <- function(j, k, t,
   ### - beta_t: matrice con i beta per tutti i cluster per tutti i coeff. 
   ###           al tempo t
   ### - theta_jt, tau_jt: media e varianza della prior dei beta
-  ### - sigma2_vec: vettore con le varianze delle osservazioni
+  ### - sigma_vec: vettore con le sd delle osservazioni
   ### - labels_t: matrice delle label al tempo t per tutti i coeff.
   ### - spline_basis: matrice con i valori delle basi spline
   
@@ -340,15 +345,15 @@ up_beta <- function(j, k, t,
   Y_t.tilde <- drop(Y_t.tilde)
   
   
-  # Devo togliere le sigma2_i delle osservazioni che non usiamo
-  sigma2_vec <- sigma2_vec[obs]
+  # Devo togliere le sigma_i delle osservazioni che non usiamo
+  sigma_vec <- sigma_vec[obs]
   
   
   # Varianza a posteriori
-  var.post <- ( 1 / tau_jt^2 + sum(1/sigma2_vec)*sum(spline_basis[, j]^2) )^(-1)
+  var.post <- ( 1 / tau_jt^2 + sum(1/sigma_vec^2)*sum(spline_basis[, j]^2) )^(-1)
   # Media a posteriori
   mean.post <- var.post * 
-    ( sum( t(t(Y_t.tilde)*spline_basis[ , j])/sigma2_vec ) + 
+    ( sum( t(t(Y_t.tilde)*spline_basis[ , j])/sigma_vec^2 ) + 
         theta_jt / tau_jt^2 )
   # Devo fare il doppio trasposto per sfruttare bene il prodotto element-wise
   
