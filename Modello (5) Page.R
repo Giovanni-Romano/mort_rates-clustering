@@ -1,9 +1,14 @@
 rm(list=ls())
-
 library(tidyverse)
 library(splines2)
 library(tidyverse)
 library(invgamma)
+library(mvnfast)
+# The fastest way I found to sample from a multivariate normal is to use 
+#   mvnfast::rmvn specifying the Chol of Sigma and using just 1 core.
+# If the Chol decomposition has to be computed each time mvnfast::rmvn is called,
+#   then a similar (slightly faster) solution is mvtnorm::rmvnorm with 
+#   "checkSimmetry = FALSE"
 
 load("C:/Users/RomanoGi/Desktop/Bocconi/Ricerca/BSP_Pavone/output/mortality.Rdata")
 load("C:/Users/RomanoGi/Desktop/Bocconi/Ricerca/mort_rates-clustering/fit_indep.RData")
@@ -72,22 +77,31 @@ n <- length(data_list_man); n
 # Dimensione stato latente (-> numero coeff)
 p <- ncol(S)
 # Varianza delle osservazioni fissata
-sigma2 <- rep(0.1^2, n)
+sigma <- rep(0.1, n)
 # Iperparametri della prior dell'ultimo layer
 m0 <- -4; s02 <- 1^2
 # Uniforms' hyperparameters
 #   Following Page's idea in paragraph 2.5 I choose these hyperparams
 A_tau <- 1
-A_delta <- 1
-A_xi <- 1
+A_delta <- 5
+A_xi <- 5
 # Hyperparams for the Beta prior on alpha
 a_alpha <- 2; b_alpha <- 3
 # Parametro di concentrazione del CRP
 M <- 2
-
-
-
-
+# Sigma --> parte della matrice varcov dei vettori theta_j
+l <- 3/2 # With l = 2 the correlations at distance (1, 2, 3, 4, 5, 6, 7) are
+          # (0.88 0.61 0.32 0.14 0.04 0.01 0.00);
+          # with l = 2 they are (0.80 0.41 0.14 0.03 0.00 0.00 0.00)
+SIGMA <- outer(1:T_final, 1:T_final, function(x1, x2) sq_exp_ker(x1-x2, l = l))
+cholSIG <- chol(SIGMA)
+# The Cholesky decomposition is useful because mvnfast::rmvn is way faster 
+#   specifying the Cholesky decomp. of the varcov matrix if it has been already
+#   computed. Otherwise, computing Chol plus applying mvnfast::rmvn(..., isChol = T)
+#   is as long as applying mvnfast::rmvn(..., isChol = F)
+SIGMAinv <- chol2inv(cholSIG)
+# The inverse of SIGMA is used in the update of the thetas, because it 
+#   contributes to the posterior variance/precision
 
 ### ### ### ### ### ### ### ### ### ###
 ### Definizione parametri del Gibbs ###
@@ -197,7 +211,7 @@ for (j in 1:p){
   alpha_res[[j]][1] <- alpha_temp[[j]] <- rbeta(1, a_alpha, b_alpha)
   
   theta_res[[j]][ , 1] <- theta_temp[[j]] <- 
-    rnorm(T_final, phi_temp[[j]], delta_temp[[j]])
+    drop(rmvn(1, rep(phi_temp[[j]], 87), delta_temp[[j]]*SIGMA))
   tau_res[[j]][ , 1] <- tau_temp[[j]] <- 
     runif(T_final, 0.1, A_tau)
   
@@ -280,7 +294,7 @@ for (d in 2:n_iter){ # Ciclo sulle iterazioni
                                               Y_it = Y[[i]][t, ],
                                               beta_i = beta_actual,
                                               beta_cluster = beta_temp[[j]][, t],
-                                              sigma2_i = sigma2[i],
+                                              sigma_i = sigma[i],
                                               lab_t = labels_temp[[j]][,t],
                                               lab_tp1 = labels_temp[[j]][,t+1], 
                                               gamma_tp1 = if (t == T_final) {'last time'} 
@@ -356,7 +370,7 @@ for (d in 2:n_iter){ # Ciclo sulle iterazioni
                                                          FUN.VALUE = double(4)),
                                         theta_jt = theta_temp[[j]][t], 
                                         tau_jt = tau_temp[[j]][t],
-                                        sigma2_vec = sigma2,
+                                        sigma_vec = sigma,
                                         labels_t = vapply(labels_temp, 
                                                           function(lab) lab[, t], 
                                                           FUN.VALUE = double(4)),
@@ -367,10 +381,7 @@ for (d in 2:n_iter){ # Ciclo sulle iterazioni
       
       ### ### ### ### ### 
       ### UPDATE THETA ###
-      theta_temp[[j]][t] <- up_theta_jt(beta_jt = beta_temp[[j]][, t],
-                                        tau_jt = tau_temp[[j]][t],
-                                        phi_j = phi_temp[[j]],
-                                        delta_j = delta_temp[[j]])
+      # Now it is done jointly for all times t outside the for loop over t
       
       
       
@@ -384,6 +395,15 @@ for (d in 2:n_iter){ # Ciclo sulle iterazioni
       
       
     } # END OF FOR LOOP OVER TIME ISTANTS "t"
+    
+    ### ### ### ### ### 
+    ### UPDATE THETA ###
+    # Now it is done jointly for all times t
+    theta_temp[[j]] <- up_theta_j(beta_j = beta_temp[[j]],
+                                  tau_j = tau_temp[[j]],
+                                  phi_j = phi_temp[[j]],
+                                  delta_j = delta_temp[[j]],
+                                  SIGinv = SIGMAinv)
     
     # Aggiungo gli elementi anche negli oggetti non-temp
     labels_res[[j]][ , , d] <- as.integer(labels_temp[[j]])
@@ -399,7 +419,8 @@ for (d in 2:n_iter){ # Ciclo sulle iterazioni
       up_phi_j(theta_j = theta_temp[[j]],
                delta_j = delta_temp[[j]],
                lambda = lambda_temp,
-               xi = xi_temp)
+               xi = xi_temp,
+               SIGinv = SIGMAinv)
     
     
     ### ### ### ### ####
@@ -416,7 +437,7 @@ for (d in 2:n_iter){ # Ciclo sulle iterazioni
     alpha_res[[j]][d] <- alpha_temp[[j]] <-
       up_alpha_j(sum(gamma_temp[[j]]),
                  n * T_final,
-                 a_alpha,
+                   a_alpha,
                  b_alpha)
   } # END OF FOR LOOP OVER COEFFICIENTS "j"
   
@@ -445,4 +466,4 @@ fine <- Sys.time()
 
 exec_time <- difftime(fine, inizio)
 
-save.image("C:/Users/RomanoGi/Desktop/Bocconi/Ricerca/mort_rates-clustering/res/uniform_prior_on_sd_2.RData")
+save.image("C:/Users/RomanoGi/Desktop/Bocconi/Ricerca/mort_rates-clustering/res/dynamic_on_theta/res.RData")

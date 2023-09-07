@@ -111,6 +111,23 @@ are.partitions.equal <- function(part1, part2){
 
 
 
+### ### ### ### ### ### ### ### ###
+#### SQUARED EXPONENTIAL KERNEL ####
+### ### ### ### ### ### ### ### ###
+sq_exp_ker <- function(d, l){
+  ### ### ### ### ### ### ### ### ### ### ###
+  ### - compute the squared exponential kernel in d = x1 - x2: exp{-(d^2)/(2l^2)}
+  ### - l control the smoothness of the kernel (the larger l and the greater the smoothness)
+  ### - the term to control the scale (which is included for example in BDA3 is 
+  ###     not considered here because I take it outside the kernel and i put a 
+  ###     prior on it)
+  exp( - d^2 / (2*l^2) )
+}
+
+
+
+
+
 ### ### ### ### ### ##
 #### UPDATE GAMMA ####
 ### ### ### ### ### ##
@@ -391,27 +408,27 @@ GaussGaussUpdate_iid <- function (xbar, n, datavar, priormean, priorvar)
 ### ### ### ### ### ##
 #### UPDATE THETA ####
 ### ### ### ### ### ##
-up_theta_jt <- function(beta_jt,
-                        tau_jt,
-                        phi_j,
-                        delta_j){
+up_theta_j <- function(beta_j,
+                       tau_j,
+                       phi_j,
+                       delta_j,
+                       SIGinv = SIGMAinv){
   ### ### ### ### ### ### ### ### ### ### ### ### ### ###
-  ### - beta_jt: vector of beta_kjt for all clusters k
+  ### - beta_j: matrix n*T of beta_kjt for all clusters k and time t
+  ### - tau_j: vector with tau_jt for all time t
   ### - the other parameters' names are clear
   
-  x <- beta_jt[!is.na(beta_jt)]
-  xbar <- mean(x)
-  n <- length(x)
+  K_j <- apply(beta_j, 2, function(b) sum(!is.na(b))) # vector w/ K_jt forall t
+  sum_beta <- colSums(beta_j, na.rm = TRUE)
   
-  postpar <- GaussGaussUpdate_iid(xbar = xbar,
-                                  n = n,
-                                  datavar = tau_jt^2,
-                                  priormean = phi_j,
-                                  priorvar = delta_j^2)
+  prec <- SIGinv/delta_j^2 + diag(K_j/tau_j^2, nrow(SIGinv))
+  varcov <- mysolve(prec)
+  mean <- varcov %*% ( rowSums(SIGinv)/delta_j^2*rep(phi_j, ncol(beta_j)) + 
+                         sum_beta / tau_j^2 )
   
-  out <- rnorm(1, 
-               mean = postpar[1], 
-               sd = sqrt(postpar[2]))
+  out <- drop(rmvn(1, 
+                   mu = mean, 
+                   sigma = varcov))
   
   return(out)
 }
@@ -426,24 +443,19 @@ up_theta_jt <- function(beta_jt,
 up_phi_j <- function(theta_j,
                      delta_j,
                      lambda,
-                     xi){
+                     xi,
+                     SIGinv){
   ### ### ### ### ### ### ### ### ### ### ### ### ### ###
   ### - theta_j: vector with theta_jt for all t
   ### - the other parameters' names are clear
   
-  x <- theta_j
-  xbar <- mean(x)
-  n <- length(x)
-  
-  postpar <- GaussGaussUpdate_iid(xbar = xbar,
-                                  n = n,
-                                  datavar = delta_j^2,
-                                  priormean = lambda,
-                                  priorvar = xi^2)
+  prec <- sum(SIGinv)/delta_j^2 + 1/xi^2
+  var <- 1/prec
+  mean = var * ( sum(theta_j * colSums(SIGinv))/delta_j^2 + lambda/xi^2 )
   
   out <- rnorm(1, 
-               mean = postpar[1], 
-               sd = sqrt(postpar[2]))
+               mean = mean, 
+               sd = sqrt(var))
   
   return(out)
 }
@@ -535,6 +547,54 @@ up_sd.RWM <- function(val_now,
 }
 
 
+
+
+
+### ### ### ### ### #
+#### UPDATE DELTA ###
+### ### ### ### ### #
+# I need a specific update for delta_j's because now they aren't the variances,
+#   but the scale parameter of the varcov matrix
+up_delta_j <- function(val_now,
+                       theta_j,
+                       phi_j,
+                       SIGchol,
+                       A_delta,
+                       eps){
+  ### ### ### ### ### ### ###\
+  ### - theta_j: vector with theta_jt for all time t
+  # Sample proposed value
+  val_prop <- runif(1, val_now - eps, val_now + eps)
+  
+  
+  # Vector with prob's of acceptance
+  
+  # Indicator to check if proposed values are in the domain
+  indicator <- (val_prop > 0 & val_prop < A_delta)
+  
+  if (indicator){
+    # Likelihood of current value and proposed one
+    likel_now <- dmvn(theta_j, 
+                      mu = rep(phi_j, length(theta_j)), 
+                      sigma =  sqrt(val_now) * SIGchol,
+                      log = TRUE,
+                      isChol = TRUE)
+    likel_prop <- dmvn(theta_j, 
+                       mu = rep(phi_j, length(theta_j)), 
+                       sigma =  sqrt(val_prop) * SIGchol,
+                       log = TRUE,
+                       isChol = TRUE)
+    logprob <- min(likel_prop - likel_now, 0)
+  } else {
+    logprob <- -Inf
+  }
+  
+  # Create output
+  acc <- (log(runif(1, 0, 1)) < logprob) 
+  out <- ifelse(acc, val_prop, val_now)
+  
+  return(out)
+}
 
 
 
