@@ -72,7 +72,7 @@ n <- length(data_list_man); n
 # Dimensione stato latente (-> numero coeff)
 p <- ncol(S)
 # Varianza delle osservazioni fissata
-sigma2 <- rep(0.1^2, n)
+sigma <- rep(0.1, n)
 # Iperparametri della prior dell'ultimo layer
 m0 <- -4; s02 <- 1^2
 # Uniforms' hyperparameters
@@ -280,7 +280,7 @@ for (d in 2:n_iter){ # Ciclo sulle iterazioni
                                               Y_it = Y[[i]][t, ],
                                               beta_i = beta_actual,
                                               beta_cluster = beta_temp[[j]][, t],
-                                              sigma2_i = sigma2[i],
+                                              sigma_i = sigma[i],
                                               lab_t = labels_temp[[j]][,t],
                                               lab_tp1 = labels_temp[[j]][,t+1], 
                                               gamma_tp1 = if (t == T_final) {'last time'} 
@@ -356,7 +356,7 @@ for (d in 2:n_iter){ # Ciclo sulle iterazioni
                                                          FUN.VALUE = double(4)),
                                         theta_jt = theta_temp[[j]][t], 
                                         tau_jt = tau_temp[[j]][t],
-                                        sigma2_vec = sigma2,
+                                        sigma_vec = sigma,
                                         labels_t = vapply(labels_temp, 
                                                           function(lab) lab[, t], 
                                                           FUN.VALUE = double(4)),
