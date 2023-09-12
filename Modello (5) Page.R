@@ -84,7 +84,19 @@ A_xi <- 1
 a_alpha <- 2; b_alpha <- 3
 # Parametro di concentrazione del CRP
 M <- 2
-
+# Sigma --> parte della matrice varcov dei vettori di beta
+l <- 3/2 # With l = 2 the correlations at distance (1, 2, 3, 4, 5, 6, 7) are
+# (0.88 0.61 0.32 0.14 0.04 0.01 0.00);
+# with l = 2 they are (0.80 0.41 0.14 0.03 0.00 0.00 0.00)
+SIGMA <- outer(1:T_final, 1:T_final, function(x1, x2) sq_exp_ker(x1-x2, l = l))
+cholSIG <- chol(SIGMA)
+# The Cholesky decomposition is useful because mvnfast::rmvn is way faster 
+#   specifying the Cholesky decomp. of the varcov matrix if it has been already
+#   computed. Otherwise, computing Chol plus applying mvnfast::rmvn(..., isChol = T)
+#   is as long as applying mvnfast::rmvn(..., isChol = F)
+SIGMAinv <- chol2inv(cholSIG)
+# The inverse of SIGMA is used in the update of the thetas, because it 
+#   contributes to the posterior variance/precision
 
 
 
@@ -210,10 +222,12 @@ for (j in 1:p){
   for (t in 1:T_final){
     lab <- rho2lab(rCRP(4, 1))
     labels_temp[[j]][, t] <- labels_res[[j]][, t, 1] <- lab
-    beta_res[[j]][1:max(lab), t, 1] <- beta_temp[[j]][1:max(lab), t] <- 
-      rnorm(max(lab),
-            mean = theta_temp[[j]][t], sd = tau_temp[[j]][t])
   }
+  beta_res[[j]][ , , 1] <- beta_temp[[j]] <- 
+    rmvn(n,
+         mu = rep(phi_temp[[j]], T_final), 
+         sigma = cholSIG,
+         isChol = TRUE)
 }
 
 rm(j); rm(t)
@@ -339,65 +353,90 @@ for (d in 2:n_iter){ # Ciclo sulle iterazioni
       } # Fine ciclo sulle osservazioni per labels
       
       
-      
-      ### ### ### ### ### ### ###
-      ### ### UPDATE BETA ### ###
-      n_cluster <- max(labels_temp[[j]][ , t])
-      
-      for (k in 1:n_cluster){ # Inizio ciclo sui cluster per i beta
-        beta_temp[[j]][k, t] <- up_beta(j = j, 
-                                        k = k, 
-                                        t = t,
-                                        Y_t = t(vapply(Y, 
-                                                       function(y) y[t, ], 
-                                                       FUN.VALUE = double(101))),
-                                        beta_t =  vapply(beta_temp, 
-                                                         function(b) b[, t], 
-                                                         FUN.VALUE = double(4)),
-                                        theta_jt = theta_temp[[j]][t], 
-                                        tau_jt = tau_temp[[j]][t],
-                                        sigma_vec = sigma,
-                                        labels_t = vapply(labels_temp, 
-                                                          function(lab) lab[, t], 
-                                                          FUN.VALUE = double(4)),
-                                        spline_basis = S)
-      } # Fine ciclo sui cluster per i beta
-      
-      
-      
-      ### ### ### ### ### 
-      ### UPDATE THETA ###
-      theta_temp[[j]][t] <- up_theta_jt(beta_jt = beta_temp[[j]][, t],
-                                        tau_jt = tau_temp[[j]][t],
-                                        phi_j = phi_temp[[j]],
-                                        delta_j = delta_temp[[j]])
-      
-      
-      
-      ### ### ### ### ###
-      ### UPDATE TAU ###
-      tau_temp[[j]][t] <- up_sd.RWM(val_now = tau_temp[[j]][t],
-                                     eps = eps_tau,
-                                     data = beta_temp[[j]][, t],
-                                     mean = theta_temp[[j]][t],
-                                     hyppar = A_tau)
-      
-      
     } # END OF FOR LOOP OVER TIME ISTANTS "t"
+    
+    
+    # Update on beta's is now joint, so I have to move also the updates of
+    #   theta and tau because they must happen after the one of the beta's
+    
+    ### ### ### ### ### ### ###
+    ### ### UPDATE BETA ### ###
+    ### ### ### ### ### ### ###
+    
+    # I get the beta for every coeff, for every country and for every time
+    # It's an array 4*101*87
+    beta_actual <- vapply(1:p, 
+                          function(h) vapply(1:T_final, 
+                                             function(s) beta_temp[[h]][labels_temp[[h]][ , s], s],
+                                             FUN.VALUE = double(4)),
+                          FUN.VALUE = matrix(1, 4, 87))
+    
+    # I obtain an array 4*101*87 to center the Y with respect to all the splines
+    #   but the j-th
+    centering <- simplify2array(apply(beta_actual, 1, function(B) B[, -j]%*%t(S[, -j]), simplify = FALSE))
+    # I change the str() of Y to center it simply
+    Y_simpl <- simplify2array(Y)
+    Y.tilde <- Y_simpl - centering
+    
+    # Sum_k g_j(x)^2
+    sum_sq_g_j <- sum(S[, j]^2)
+    
+    # I get the labels for j-th spline because I'll use them multiple times
+    lab_j <- labels_temp[[j]]
+    
+    for (k in 1:n){ # Inizio ciclo sui cluster per i beta
+      
+      # Sum of the precision that contributes to the varcov matrix of the
+      #   of the posterior in the part that comes from the likelihood
+      sum_prec_k <- vapply(1:T_final, 
+                           function(s) sum(1/sigma[which(lab_j[, s] == k)]^2), 
+                           FUN.VALUE = double(1))
+      # Sum_{y : c_ijt = k} \tilde{y_ixt} / sigma_i^2 --> goes in the mean of 
+      #   the posterior in the part that comes from the likelihood
+      sum_y_sig <- vapply(1:T_final, 
+                          function(s) colSums( t(Y.tilde[s, , which(lab_j[, s] == k)])/
+                                                sigma[which(lab_j[, s] == k)]^2 ), 
+                          FUN.VALUE = double(101))
+      # Sum_x g_j(x)*"term just computed" --> contribution of the likelihood 
+      #   to the posterior mean
+      lik2mean <- S[, j] %*% sum_y_sig
+      # I can't compute this outside the "k" loop because sum_y_sig depends on k
+      
+      # Contribution of the likelihood to the varcov (precision) matrix;
+      #   it's the argument of the diagonal matrix
+      lik2var <- sum_prec_k * sum_sq_g_j
+      
+      # What observations are in the k-th cluster?
+      #   It's a list of 87 elements, each with the observations in the k-th
+      #   cluster. I cannot simplify to a matrix because the elements have
+      #   different lengths.
+      obs_k <- apply(lab_j, 2, function(l) which(l == k))
+      
+      
+      beta_temp[[j]][k, ] <- up_beta(Y.t = Y.tilde,
+                                     l2v = lik2var,
+                                     l2m = lik2mean,
+                                     obs = obs_k,
+                                     SIGinv = SIGMAinv,
+                                     d_j = delta_temp[[j]],
+                                     phi_j = phi_temp[[j]])
+    } # Fine ciclo sui cluster per i beta
+    
     
     # Aggiungo gli elementi anche negli oggetti non-temp
     labels_res[[j]][ , , d] <- as.integer(labels_temp[[j]])
     gamma_res[[j]][ , , d] <- gamma_temp[[j]]
     beta_res[[j]][ , , d] <- beta_temp[[j]]
-    theta_res[[j]][ , d] <- theta_temp[[j]]
-    tau_res[[j]][ , d] <- tau_temp[[j]]
+  
+    
     
     
     ### ### ### ### ##
     ### UPDATE PHI ###
     phi_res[[j]][d] <- phi_temp[[j]] <- 
-      up_phi_j(theta_j = theta_temp[[j]],
+      up_phi_j(beta_j = beta_temp[[j]],
                delta_j = delta_temp[[j]],
+               SIGinv = SIGMAinv,
                lambda = lambda_temp,
                xi = xi_temp)
     

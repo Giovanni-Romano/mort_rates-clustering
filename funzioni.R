@@ -111,6 +111,23 @@ are.partitions.equal <- function(part1, part2){
 
 
 
+### ### ### ### ### ### ### ### ###
+#### SQUARED EXPONENTIAL KERNEL ####
+### ### ### ### ### ### ### ### ###
+sq_exp_ker <- function(d, l){
+  ### ### ### ### ### ### ### ### ### ### ###
+  ### - compute the squared exponential kernel in d = x1 - x2: exp{-(d^2)/(2l^2)}
+  ### - l control the smoothness of the kernel (the larger l and the greater the smoothness)
+  ### - the term to control the scale (which is included for example in BDA3 is 
+  ###     not considered here because I take it outside the kernel and i put a 
+  ###     prior on it)
+  exp( - d^2 / (2*l^2) )
+}
+
+
+
+
+
 ### ### ### ### ### ##
 #### UPDATE GAMMA ####
 ### ### ### ### ### ##
@@ -303,61 +320,25 @@ up_label_i <- function(i, j,
 ## ### ### ### ### ##
 #### UPDATE BETA ####
 ## ### ### ### ### ##
-up_beta <- function(j, k, t,
-                    Y_t,
-                    beta_t,
-                    theta_jt, tau_jt,
-                    sigma_vec,
-                    labels_t,
-                    spline_basis){
-  ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ###
-  ### - j: indice del coefficiente di cui stiamo aggiornando la media
-  ### - k: indice del cluster di cui stiamo aggiornando la media
-  ### - t: istante temporale attuale
-  ### - Y_t: matrix with Y_{ixt} for all obs. i and all obs. x
-  ### - beta_t: matrice con i beta per tutti i cluster per tutti i coeff. 
-  ###           al tempo t
-  ### - theta_jt, tau_jt: media e varianza della prior dei beta
-  ### - sigma_vec: vettore con le sd delle osservazioni
-  ### - labels_t: matrice delle label al tempo t per tutti i coeff.
-  ### - spline_basis: matrice con i valori delle basi spline
+up_beta <- function(Y.t = Y.tilde,
+                    l2v = lik2var,
+                    l2m = lik2mean,
+                    obs = obs_k,
+                    SIGinv = SIGMAinv,
+                    d_j = delta_temp[[j]],
+                    phi_j = phi_temp[[j]]){
   
-  # Devo trovare quali osservazioni appartengono al cluster k per il 
-  #   e coeff. j e poi uso conjugacy Gauss-Gauss.
-  # obs <- lab2rho(labels_t[ , j])[[k]]
-  obs <- which(labels_t[ , j] == k)
-  
-  # Lavoro su \tilde{Y}_ixt, cioè le osservazioni Y_{ixt} meno le spline tranne
-  #   la j-esima, così che beta_jkt*g_j(x) sia la media di questa
-  #   nuova variabile. Inoltre tengo solo le osservazioni che servono, cioè 
-  #   quelle che per il coefficiente j appartengono al cluster k
-  
-  # Devo recuperare i beta giusti per ogni osservazione per ogni coeff. != j
-  p <- ncol(spline_basis)
-  beta_actual <- vapply(1:p, 
-                        function(x) beta_t[labels_t[ , x], x],
-                        FUN.VALUE = double(4))[obs, -j] # tolgo la j-esima colonna
-                                                        # e le oss. non nel cluster
-  # Costruisco effettivamente \tilde{Y}_t
-  Y_t.tilde <- Y_t[obs, ] - beta_actual %*% t(spline_basis[ , -j])
-  # Se Y_t.tilde ha una riga sola, lo trasformo in vettore; se ha più di 
-  #   una riga, non succede niente.
-  Y_t.tilde <- drop(Y_t.tilde)
-  
-  
-  # Devo togliere le sigma_i delle osservazioni che non usiamo
-  sigma_vec <- sigma_vec[obs]
-  
-  
-  # Varianza a posteriori
-  var.post <- ( 1 / tau_jt^2 + sum(1/sigma_vec^2)*sum(spline_basis[, j]^2) )^(-1)
+  # Posterior precision matrix
+  prec.post <- (SIGinv/d_j^2) + diag(l2v, ncol = ncol(SIGinv))
+  # Posterior varcov matrix
+  varcov.post <- mysolve(prec.post)
   # Media a posteriori
-  mean.post <- var.post * 
-    ( sum( t(t(Y_t.tilde)*spline_basis[ , j])/sigma_vec^2 ) + 
-        theta_jt / tau_jt^2 )
-  # Devo fare il doppio trasposto per sfruttare bene il prodotto element-wise
+  mean.post <- varcov.post %*%  
+    ( (SIGinv/d_j^2) %*% rep(phi_j, ncol(SIGinv)) + t(l2m)  )
   
-  beta_updated <- rnorm(1, mean = mean.post, sd = sqrt(var.post))
+  beta_updated <- drop(rmvn(1, 
+                            mu = mean.post, 
+                            sigma = varcov.post))
   
   return(beta_updated)
 }
@@ -388,33 +369,33 @@ GaussGaussUpdate_iid <- function (xbar, n, datavar, priormean, priorvar)
 
 
 
-### ### ### ### ### ##
-#### UPDATE THETA ####
-### ### ### ### ### ##
-up_theta_jt <- function(beta_jt,
-                        tau_jt,
-                        phi_j,
-                        delta_j){
-  ### ### ### ### ### ### ### ### ### ### ### ### ### ###
-  ### - beta_jt: vector of beta_kjt for all clusters k
-  ### - the other parameters' names are clear
-  
-  x <- beta_jt[!is.na(beta_jt)]
-  xbar <- mean(x)
-  n <- length(x)
-  
-  postpar <- GaussGaussUpdate_iid(xbar = xbar,
-                                  n = n,
-                                  datavar = tau_jt^2,
-                                  priormean = phi_j,
-                                  priorvar = delta_j^2)
-  
-  out <- rnorm(1, 
-               mean = postpar[1], 
-               sd = sqrt(postpar[2]))
-  
-  return(out)
-}
+# ### ### ### ### ### ##
+# #### UPDATE THETA ####
+# ### ### ### ### ### ##
+# up_theta_jt <- function(beta_jt,
+#                         tau_jt,
+#                         phi_j,
+#                         delta_j){
+#   ### ### ### ### ### ### ### ### ### ### ### ### ### ###
+#   ### - beta_jt: vector of beta_kjt for all clusters k
+#   ### - the other parameters' names are clear
+#   
+#   x <- beta_jt[!is.na(beta_jt)]
+#   xbar <- mean(x)
+#   n <- length(x)
+#   
+#   postpar <- GaussGaussUpdate_iid(xbar = xbar,
+#                                   n = n,
+#                                   datavar = tau_jt^2,
+#                                   priormean = phi_j,
+#                                   priorvar = delta_j^2)
+#   
+#   out <- rnorm(1, 
+#                mean = postpar[1], 
+#                sd = sqrt(postpar[2]))
+#   
+#   return(out)
+# }
 
 
 
@@ -423,27 +404,29 @@ up_theta_jt <- function(beta_jt,
 ### ### #### ### ### 
 #### UPDATE PHI ####
 ### ### #### ### ### 
-up_phi_j <- function(theta_j,
+up_phi_j <- function(beta_j,
                      delta_j,
+                     SIGinv,
                      lambda,
                      xi){
   ### ### ### ### ### ### ### ### ### ### ### ### ### ###
-  ### - theta_j: vector with theta_jt for all t
+  ### - beta_j: vector with beta_kjt for all k and all t
   ### - the other parameters' names are clear
   
-  x <- theta_j
-  xbar <- mean(x)
-  n <- length(x)
+  x <- beta_kjt
+  K <- nrow(x)
   
-  postpar <- GaussGaussUpdate_iid(xbar = xbar,
-                                  n = n,
-                                  datavar = delta_j^2,
-                                  priormean = lambda,
-                                  priorvar = xi^2)
+  # Precision of the posterior
+  prec.post <- (K/delta_j^2) * sum(SIGinv) + 1/xi^2
+  # Variance of the posterior
+  var.post <- 1/prec.post
+  # Mean of the posterior
+  mean.post <- (1/delta_j^2) * sum( colSums(SIGinv) * colSums(x) ) + 
+    lambda/xi^2 
   
   out <- rnorm(1, 
-               mean = postpar[1], 
-               sd = sqrt(postpar[2]))
+               mean = mean.post, 
+               sd = sqrt(var.post))
   
   return(out)
 }
@@ -478,6 +461,56 @@ up_lambda <- function(phi,
   return(out)
 }
 
+
+
+
+
+### ### ### ### ### ##
+#### UPDATE DELTA ####
+### ### ### ### ### ##
+# I need a specific update for delta_j's because now they aren't the variances,
+#   but the "scale" parameter of the varcov matrix
+up_delta_j <- function(val_now,
+                       beta_j,
+                       phi_j,
+                       SIGchol,
+                       A_delta,
+                       eps){
+  ### ### ### ### ### ### ###\
+  ### - beta_j: vector with beta_kjt for all clusters k and all times t
+  # Sample proposed value
+  val_prop <- runif(1, val_now - eps, val_now + eps)
+  
+  
+  # Vector with prob's of acceptance
+  
+  # Indicator to check if proposed values are in the domain
+  indicator <- (val_prop > 0 & val_prop < A_delta)
+  
+  if (indicator){
+    # Likelihood of current value and proposed one
+    likel_now <- sum(dmvn(beta_j, 
+                      mu = rep(phi_j, ncol(beta_j)), 
+                      sigma =  val_now * SIGchol,
+                      log = TRUE,
+                      isChol = TRUE))
+    
+    likel_prop <- sum(dmvn(beta_j, 
+                           mu = rep(phi_j, ncol(beta_j)), 
+                           sigma =  val_prop * SIGchol,
+                           log = TRUE,
+                           isChol = TRUE))
+    logprob <- min(likel_prop - likel_now, 0)
+  } else {
+    logprob <- -Inf
+  }
+  
+  # Create output
+  acc <- (log(runif(1, 0, 1)) < logprob) 
+  out <- ifelse(acc, val_prop, val_now)
+  
+  return(out)
+}
 
 
 
