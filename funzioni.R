@@ -222,46 +222,40 @@ up_label_i <- function(i, j,
   lab_tmi <- lab_t
   lab_tmi[i] <- -1
   
-  
-  # whichclusters <- which(vapply(rho_tmi, function(x) length(x)>0, FUN.VALUE = FALSE)) # cluster esistenti
-  whichclusters <- unique(lab_tmi[lab_tmi > 0])
-  whichclusters <- c(whichclusters, max(whichclusters)+1L) # aggiungo il possibile cluster nuovo
-  # Uso "1L" per farlo venire integer, altrimenti il "+1" lo rende un float
-  
-  # whichcluster non è ordinata - e.g. può essere (2, 1, 3, 4) invece di c(1, 2, 3, 4) -,
-  #   ma non è un problema, perché alla fine della funzione utilizzo 
-  #   whichcluster[which.max(lll)], quindi l'importante è che ci sia corrispondenza
-  #   tra l'ordine di whichcluster e quello di lll (cosa che succede visto come
-  #   è creato logp)
+  # Clusters with at least one observetion assigned to it; I need this to choose
+  #   if its dCRP is cluster size or M
+  non_empty_clust <- unique(lab_tmi[lab_tmi > 0])
   
   means <- drop(spline_basis[, -j] %*% beta_i[-j])
   means_list <- c()
   prob_cit_list <- c()
   check_list <- c()
   
-  for (h in whichclusters){
+  for (h in 1:nrow(beta_j)){
     # Devo costruire la partizione con l'i-esima osservazione inserita
     #   nell'h-esimo cluster
     lab_t.h <- lab_tmi
     lab_t.h[i] <- h
     
-    # Nel paper di Page: Pr(c_it = h) e N(Y_it | bla bla).
-    if (h < max(whichclusters)){ # se il cluster è già esistente, devo usare il beta di quel cluster
-      beta <- beta_cluster[h]
+    # Since here we always have the beta's for all the clusters (even the empty 
+    #   ones), if the unit i is assigned to an empty cluster, I don't sample a 
+    #   new value for the beta because I already have it. I think this 
+    #   procedure is more similar to MacEachern&Muller1994 than to Neal200.
+    # I don't think this is a problem because at each iteration I update all
+    #   betas, also the ones corresponding to empty clusters.
+    beta <- beta_cluster[h]
+    
+    # Now the only difference between empty and non-empty clusters is the weight
+    #   given by the CRP. If the cluster is not empty than its weight is the 
+    #   size of the cluster, otherwise it's M divided by the number of empty 
+    #   clusters at that moment
+    if (h  %in% non_empty_clust){ # se il cluster è già esistente, devo usare il beta di quel cluster
       prob_cit <- sum(lab_tmi == h)
-    } else { # If the cluster to which i is assigned is an empty one..
-      # The procedure in Neal's paper is a bit different from the one used in Page: 
-      #   - Page always sample a new value from the prior
-      #   - Neal sample a new value only if the cluster is actually new, i.e.
-      #       if obs. i was a singleton before the update and now it is assigned
-      #       to an empty cluster, than that cluster is its old one, so the 
-      #       value of beta is the old one.
-      if (sum(lab_t == k) == 1){
-        beta <- beta_cluster[k]
-      } else{
-        beta <- newclustervalue
-      }
-      prob_cit <- M
+    } else { # If the cluster to which i is assigned is an empty one
+      prob_cit <- M / (nrow(beta_j) - length(non_empty_clust))
+      # The division is not actually necessary because it could go into the
+      #   normalizing constant, but I'm explicitly including it so that I 
+      #   keep track of the "true" procedure that I'm following
     }
     
     # I beta che devo usare sono il vettore beta_i, sostituendo

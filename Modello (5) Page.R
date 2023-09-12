@@ -6,7 +6,7 @@ library(tidyverse)
 library(invgamma)
 
 load("C:/Users/RomanoGi/Desktop/Bocconi/Ricerca/BSP_Pavone/output/mortality.Rdata")
-load("C:/Users/RomanoGi/Desktop/Bocconi/Ricerca/mort_rates-clustering/fit_indep.RData")
+# load("C:/Users/RomanoGi/Desktop/Bocconi/Ricerca/mort_rates-clustering/fit_indep.RData")
 source("funzioni.R")
 
 data_list_man <- list(ita_man = log(Y_ita_man / N_ita_man),
@@ -303,52 +303,9 @@ for (d in 2:n_iter){ # Ciclo sulle iterazioni
                                               spline_basis = S)
         
         
-        # Sistemo le labels in modo tale che non ci siano buchi (tipo non 
-        # voglio c(1, 2, 2, 4) ma c(1, 2, 2, 4)) e che siano ordinate
-        # (tipo non voglio c(2, 1, 2, 3) ma c(1, 2, 1, 3)).
-        labels_new <- c(1L)
-        counter <- 2L
-        for (ii in 2:n){
-          if (!(labels_temp[[j]][ii, t] %in% labels_temp[[j]][1:(ii-1), t])){
-            labels_new[ii] <- counter
-            counter <- counter+1
-          } else{
-            labels_new[ii] <- labels_new[which(labels_temp[[j]][, t] == 
-                                                 labels_temp[[j]][ii, t])[1]]
-          }
-        }
-        
-        # Voglio riordinare anche beta_temp in accordo con le labels:
-        #   facendo unique(...) ottengo i valori unici delle labels in ordine
-        #   di apparizione nel vettore (e non in ordine cresc./decresc.).
-        #   Questo vettore dà la permutazione necessaria.
-        
-        if (all(labels_temp[[j]][i, t] > labels_temp[[j]][-i, t])){
-          # Se la label dell'unità i è maggiore di tutte le altre, vuol dire
-          #   che è andato in un nuovo cluster e non in uno di quelli esistenti,
-          #   quindi aggiungo il beta del nuovo cluster al vettore dei beta
-          #   dei cluster.
-          if (labels_temp[[j]][i, t] > n){
-            # If the new cluster is the (n+1)st, then I cannot modify directly
-            #   beta_temp because I would exceed its size.
-            beta_extended <- c(beta_temp[[j]][, t], newclustervalue)
-            sort_beta_temp <- unique(labels_temp[[j]][, t])
-            beta_new <- beta_extended[sort_beta_temp]
-          } else { # If new cluster is <= n
-            beta_temp[[j]][labels_temp[[j]][i, t], t] <- newclustervalue
-            sort_beta_temp <- unique(labels_temp[[j]][, t])
-            beta_new <- beta_temp[[j]][sort_beta_temp, t]
-          }
-        } else { # If not new cluster
-          sort_beta_temp <- unique(labels_temp[[j]][, t])
-          beta_new <- beta_temp[[j]][sort_beta_temp, t]
-        }
-        
-        beta_temp[[j]][, t] <- NA
-        beta_temp[[j]][1:length(sort_beta_temp), t] <- beta_new
-        
-        # Finally, I assign the new fixed label to the storing object
-        labels_temp[[j]][, t] <- labels_new
+      # In this version I must not reorder labels to avoid "gaps" anymore 
+      #   because now the value of the label is important because it 
+      #   corresponds to a particular curve of (beta_kj1, ..., beta_kjT).
         
       } # Fine ciclo sulle osservazioni per labels
       
