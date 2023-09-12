@@ -576,12 +576,12 @@ up_delta_j <- function(val_now,
     # Likelihood of current value and proposed one
     likel_now <- dmvn(theta_j, 
                       mu = rep(phi_j, length(theta_j)), 
-                      sigma =  sqrt(val_now) * SIGchol,
+                      sigma =  val_now * SIGchol,
                       log = TRUE,
                       isChol = TRUE)
     likel_prop <- dmvn(theta_j, 
                        mu = rep(phi_j, length(theta_j)), 
-                       sigma =  sqrt(val_prop) * SIGchol,
+                       sigma =  val_prop * SIGchol,
                        log = TRUE,
                        isChol = TRUE)
     logprob <- min(likel_prop - likel_now, 0)
