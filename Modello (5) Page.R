@@ -120,8 +120,7 @@ eps_xi <- A_xi
 #   use a Gaussian RW to have more proposed values close to the current point
 #   but w/o completely avoid longer steps (as it would happen with a Unif RW
 #   with eps = 0.1).
-# eps_delta <- 0.1
-eps_delta <- A_delta
+eps_delta <- 0.1
 
 
 
