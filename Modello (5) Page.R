@@ -1,5 +1,5 @@
 rm(list=ls())
-
+counter_ind <- rep(0, 20)
 library(tidyverse)
 library(splines2)
 library(tidyverse)
@@ -77,9 +77,8 @@ sigma <- rep(0.1, n)
 m0 <- -4; s02 <- 1^2
 # Uniforms' hyperparameters
 #   Following Page's idea in paragraph 2.5 I choose these hyperparams
-A_tau <- 1
-A_delta <- 1
-A_xi <- 1
+A_delta <- 2
+A_xi <- 5
 # Hyperparams for the Beta prior on alpha
 a_alpha <- 2; b_alpha <- 3
 # Parametro di concentrazione del CRP
@@ -107,12 +106,22 @@ SIGMAinv <- chol2inv(cholSIG)
 
 # Numero iterazioni
 n_iter <- 5000
+
 # RW step sizes
 #   I've done some diagnostics and it seems that the best thing to do is to 
 #   to pick a large stepsize, so I set it equal to the size of the domain
-eps_tau <- A_tau
-eps_delta <- A_delta
 eps_xi <- A_xi
+# I noticed that the beahviour of delta in the model w/ time-dependence in the
+#   beta's needed a different treatment with respect to the other variance's
+#   parameters. A Uniform RW-MH with step-size equal to the length of the 
+#   domain (eps = A_delta) was not okay because the likelihood is quite peaked
+#   on an interval of length 0.2/0.3 and so the majority of proposed values 
+#   were rejected. The solution that I am using is to reduce the eps and to 
+#   use a Gaussian RW to have more proposed values close to the current point
+#   but w/o completely avoid longer steps (as it would happen with a Unif RW
+#   with eps = 0.1).
+# eps_delta <- 0.1
+eps_delta <- A_delta
 
 
 
@@ -144,13 +153,13 @@ beta_res <- replicate(p,
                       ),
                       simplify = FALSE)
 
-theta_res <- tau_res <- replicate(p,
-                                  array(NA,
-                                        dim = c(T_final, # numero istanti temporali
-                                                n_iter # numero iterazioni
-                                        )
-                                  ),
-                                  simplify = FALSE)
+theta_res <- replicate(p,
+                       array(NA,
+                             dim = c(T_final, # numero istanti temporali
+                                     n_iter # numero iterazioni
+                             )
+                       ),
+                       simplify = FALSE)
 
 phi_res <- delta_res <- replicate(p,
                                   array(NA,
@@ -179,12 +188,12 @@ gamma_temp <- labels_temp <-
                          ),
                          simplify = FALSE)
 
-theta_temp <- tau_temp <- replicate(p,
-                                  array(NA,
-                                        dim = c(T_final # numero istanti temporali
-                                                )
-                                        ),
-                                  simplify = FALSE)
+theta_temp <- replicate(p,
+                        array(NA,
+                              dim = c(T_final # numero istanti temporali
+                              )
+                        ),
+                        simplify = FALSE)
 
 phi_temp <- delta_temp <- replicate(p, list(NA))
 alpha_temp <- replicate(p, list(NA))
@@ -210,8 +219,6 @@ for (j in 1:p){
   
   theta_res[[j]][ , 1] <- theta_temp[[j]] <- 
     rnorm(T_final, phi_temp[[j]], delta_temp[[j]])
-  tau_res[[j]][ , 1] <- tau_temp[[j]] <- 
-    runif(T_final, 0.1, A_tau)
   
   
   # Per ora inizializzo tutti i gamma = 0, così da lasciare piena libertà di 
@@ -250,7 +257,7 @@ for (d in 2:n_iter){ # Ciclo sulle iterazioni
                             as.character(Sys.time()), "\n")}
   
   for (j in 1:p){ # Ciclo sui coefficienti
-    for (t in 1:T_final){ # Ciclo sugli istanti
+    for (t in 1:87){ # Ciclo sugli istanti
       ### ### ### ### ### ### ####
       ### ### UPDATE GAMMA ### ###
       
@@ -282,12 +289,6 @@ for (d in 2:n_iter){ # Ciclo sulle iterazioni
                               FUN.VALUE = double(1))
         
         
-        
-        
-        # Campiono possibile nuovo valore per beta
-        newclustervalue <- rnorm(1, theta_temp[[j]][t], tau_temp[[j]][t])
-        
-        
         # Non assegno qua anche a labels_res perché dovrò prima sistemarlo
         labels_temp[[j]][i, t] <-  up_label_i(i = i, 
                                               j = j,
@@ -299,7 +300,6 @@ for (d in 2:n_iter){ # Ciclo sulle iterazioni
                                               lab_tp1 = labels_temp[[j]][,t+1], 
                                               gamma_tp1 = if (t == T_final) {'last time'} 
                                               else {gamma_temp[[j]][, t+1]},
-                                              newclustervalue = newclustervalue,
                                               spline_basis = S)
         
         
@@ -400,13 +400,16 @@ for (d in 2:n_iter){ # Ciclo sulle iterazioni
     
     ### ### ### ### ####
     ### UPDATE DELTA ###
-    delta_res[[j]][d] <- delta_temp[[j]] <- 
-      up_sd.RWM(val_now = delta_temp[[j]],
-                eps = eps_delta,
-                data = theta_temp[[j]],
-                mean = phi_temp[[j]],
-                hyppar = A_delta)
+    tmp_out_delta <- up_delta_j(val_now = delta_temp[[j]],
+                                beta_j = beta_temp[[j]],
+                                phi_j = phi_temp[[j]],
+                                SIGchol = cholSIG,
+                                A_delta = A_delta,
+                                eps = eps_delta)
+    delta_res[[j]][d] <- delta_temp[[j]] <- tmp_out_delta$out
+    counter_ind[j] <- counter_ind[j] + as.integer(tmp_out_delta$ind)
     
+
     ### ### ### ### ####
     ### UPDATE ALPHA ###
     alpha_res[[j]][d] <- alpha_temp[[j]] <-
@@ -441,4 +444,4 @@ fine <- Sys.time()
 
 exec_time <- difftime(fine, inizio)
 
-save.image("C:/Users/RomanoGi/Desktop/Bocconi/Ricerca/mort_rates-clustering/res/uniform_prior_on_sd_2.RData")
+save.image("C:/Users/RomanoGi/Desktop/Bocconi/Ricerca/mort_rates-clustering/res/dynamic_on_beta/res_old_up_delta.RData")

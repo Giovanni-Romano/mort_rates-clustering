@@ -195,7 +195,6 @@ up_label_i <- function(i, j,
                        beta_cluster,
                        sigma_i,
                        lab_t, lab_tp1, gamma_tp1,
-                       newclustervalue,
                        spline_basis) {
   
   ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ###
@@ -231,7 +230,7 @@ up_label_i <- function(i, j,
   prob_cit_list <- c()
   check_list <- c()
   
-  for (h in 1:nrow(beta_j)){
+  for (h in 1:length(beta_cluster)){
     # Devo costruire la partizione con l'i-esima osservazione inserita
     #   nell'h-esimo cluster
     lab_t.h <- lab_tmi
@@ -252,7 +251,7 @@ up_label_i <- function(i, j,
     if (h  %in% non_empty_clust){ # se il cluster è già esistente, devo usare il beta di quel cluster
       prob_cit <- sum(lab_tmi == h)
     } else { # If the cluster to which i is assigned is an empty one
-      prob_cit <- M / (nrow(beta_j) - length(non_empty_clust))
+      prob_cit <- M / (length(beta_cluster) - length(non_empty_clust))
       # The division is not actually necessary because it could go into the
       #   normalizing constant, but I'm explicitly including it so that I 
       #   keep track of the "true" procedure that I'm following
@@ -302,7 +301,7 @@ up_label_i <- function(i, j,
   gumbel <- -log(-log(runif(length(logp))))
   lll <- logp + gumbel
   
-  c_it <- whichclusters[which.max(lll)]
+  c_it <- which.max(lll)
   return(c_it)
 }
 
@@ -407,7 +406,7 @@ up_phi_j <- function(beta_j,
   ### - beta_j: vector with beta_kjt for all k and all t
   ### - the other parameters' names are clear
   
-  x <- beta_kjt
+  x <- beta_j
   K <- nrow(x)
   
   # Precision of the posterior
@@ -415,8 +414,8 @@ up_phi_j <- function(beta_j,
   # Variance of the posterior
   var.post <- 1/prec.post
   # Mean of the posterior
-  mean.post <- (1/delta_j^2) * sum( colSums(SIGinv) * colSums(x) ) + 
-    lambda/xi^2 
+  mean.post <- var.post * ( (1/delta_j^2) * sum( colSums(SIGinv) * colSums(x) ) + 
+                              lambda/xi^2 )
   
   out <- rnorm(1, 
                mean = mean.post, 
@@ -464,16 +463,27 @@ up_lambda <- function(phi,
 ### ### ### ### ### ##
 # I need a specific update for delta_j's because now they aren't the variances,
 #   but the "scale" parameter of the varcov matrix
+
+# I noticed that the beahviour of delta in the model w/ time-dependence in the
+#   beta's needed a different treatment with respect to the other variance's
+#   parameters. A Uniform RW-MH with step-size equal to the length of the 
+#   domain (eps = A_delta) was not okay because the likelihood is quite peaked
+#   on an interval of length 0.2/0.3 and so the majority of proposed values 
+#   were rejected. The solution that I am using is to reduce the eps and to 
+#   use a Gaussian RW to have more proposed values close to the current point
+#   but w/o completely avoid longer steps (as it would happen with a Unif RW
+#   with eps = 0.1).
+
 up_delta_j <- function(val_now,
                        beta_j,
                        phi_j,
                        SIGchol,
                        A_delta,
                        eps){
-  ### ### ### ### ### ### ###\
+  ### ### ### ### ### ### ###
   ### - beta_j: vector with beta_kjt for all clusters k and all times t
   # Sample proposed value
-  val_prop <- runif(1, val_now - eps, val_now + eps)
+  val_prop <- rnorm(1, mean = val_now, sd = eps)
   
   
   # Vector with prob's of acceptance
@@ -503,7 +513,7 @@ up_delta_j <- function(val_now,
   acc <- (log(runif(1, 0, 1)) < logprob) 
   out <- ifelse(acc, val_prop, val_now)
   
-  return(out)
+  return(list(out = out, ind = indicator))
 }
 
 
