@@ -1,43 +1,32 @@
 rm(list=ls())
-counter_ind <- rep(0, 20)
-library(tidyverse)
+# library(tidyverse)
 library(splines2)
-library(tidyverse)
-library(invgamma)
+# library(tidyverse)
+# library(invgamma)
 
-load("C:/Users/RomanoGi/Desktop/Bocconi/Ricerca/BSP_Pavone/output/mortality.Rdata")
-# load("C:/Users/RomanoGi/Desktop/Bocconi/Ricerca/mort_rates-clustering/fit_indep.RData")
+setwd("C:/Users/RomanoGi/Desktop/Bocconi/Ricerca/mort_rates-clustering")
+load("simdata/simdata4.Rdata")
 source("funzioni.R")
 
-data_list_man <- list(ita_man = log(Y_ita_man / N_ita_man),
-                      swe_man = log(Y_swe_man / N_swe_man),
-                      uk_man = log(Y_uk_man / N_uk_man),
-                      us_man = log(Y_us_man / N_us_man))
-
-data_list_woman <- list(ita_woman = log(Y_ita_woman / N_ita_woman),
-                        swe_woman = log(Y_swe_woman / N_swe_woman),
-                        uk_woman = log(Y_uk_woman / N_uk_woman),
-                        us_woman = log(Y_us_woman / N_us_woman))
 
 set.seed(4238)
 
 
-
-
+data <- sim2$data
+str(data)
 
 ### ### ### ### ### ###
 #### Basi B-Spline ####
 ### ### ### ### ### ###
 # Maximum age
-Z <- 87
 ages <- 0:100
 ages_no0 <- ages[-1]
 
 # Construction of the spline basis functions
 S.temp <- bSpline(ages_no0, 
-                 knots = c(seq(5, 40, by = 5), 50, 60, seq(70, 95, by = 5)), 
-                 degree = 2, 
-                 intercept = TRUE)
+                  knots = knots, 
+                  degree = 2, 
+                  intercept = TRUE)
 # Il numero di basi B-spline è pari al numero di nodi interni più l'ordine
 #   scelto per le basi, che è pari al degree più uno. Quindi in questo caso
 #   il numero di basi B-spline è 16+3=19.
@@ -52,7 +41,7 @@ for (k in 1:K){
 #   aggiungo anche l'età 0 e la base attiva solo in 0.
 S <- rbind(c(1, rep(0, k)),
            cbind(rep(0, length(ages_no0)), S.temp)
-           )
+)
 
 
 
@@ -63,16 +52,13 @@ S <- rbind(c(1, rep(0, k)),
 ### ### ### ### ### ### ### ### ### ### ###
 
 # Numero istanti temporali
-T_final <- min(sapply(c(data_list_man, data_list_woman), 
-                      NROW)) # Italy ha un anno in meno degli altri,
-# quindi mi fermo al suo ultimo anno
-T_final
+T_final <- ncol(data[[1]]); T_final
 # Numero stati considerati
-n <- length(data_list_man); n
-# Dimensione stato latente (-> numero coeff)
-p <- ncol(S)
+n <- length(data); n
+# Numero coeff
+p <- ncol(S); p
 # Varianza delle osservazioni fissata
-sigma <- rep(0.1, n)
+sigma <- sigma_vec; sigma
 # Iperparametri della prior dell'ultimo layer
 m0 <- -4; s02 <- 1^2
 # Uniforms' hyperparameters
@@ -84,18 +70,11 @@ a_alpha <- 2; b_alpha <- 3
 # Parametro di concentrazione del CRP
 M <- 2
 # Sigma --> parte della matrice varcov dei vettori di beta
-l <- 3/2 # With l = 2 the correlations at distance (1, 2, 3, 4, 5, 6, 7) are
-# (0.88 0.61 0.32 0.14 0.04 0.01 0.00);
-# with l = 2 they are (0.80 0.41 0.14 0.03 0.00 0.00 0.00)
+l <- 3/2
 SIGMA <- outer(1:T_final, 1:T_final, function(x1, x2) sq_exp_ker(x1-x2, l = l))
 cholSIG <- chol(SIGMA)
-# The Cholesky decomposition is useful because mvnfast::rmvn is way faster 
-#   specifying the Cholesky decomp. of the varcov matrix if it has been already
-#   computed. Otherwise, computing Chol plus applying mvnfast::rmvn(..., isChol = T)
-#   is as long as applying mvnfast::rmvn(..., isChol = F)
 SIGMAinv <- chol2inv(cholSIG)
-# The inverse of SIGMA is used in the update of the thetas, because it 
-#   contributes to the posterior variance/precision
+
 
 
 
@@ -152,13 +131,6 @@ beta_res <- replicate(p,
                       ),
                       simplify = FALSE)
 
-theta_res <- replicate(p,
-                       array(NA,
-                             dim = c(T_final, # numero istanti temporali
-                                     n_iter # numero iterazioni
-                             )
-                       ),
-                       simplify = FALSE)
 
 phi_res <- delta_res <- replicate(p,
                                   array(NA,
@@ -181,18 +153,11 @@ lambda_res <- xi_res <- rep(NA, n_iter)
 gamma_temp <- labels_temp <-
   beta_temp <- replicate(p,
                          array(NA,
-                                dim = c(n, # numero di osservazioni
-                                        ncol = T_final # numero istanti temporali
-                                        )
+                               dim = c(n, # numero di osservazioni
+                                       ncol = T_final # numero istanti temporali
+                               )
                          ),
                          simplify = FALSE)
-
-theta_temp <- replicate(p,
-                        array(NA,
-                              dim = c(T_final # numero istanti temporali
-                              )
-                        ),
-                        simplify = FALSE)
 
 phi_temp <- delta_temp <- replicate(p, list(NA))
 alpha_temp <- replicate(p, list(NA))
@@ -216,9 +181,6 @@ for (j in 1:p){
   
   alpha_res[[j]][1] <- alpha_temp[[j]] <- rbeta(1, a_alpha, b_alpha)
   
-  theta_res[[j]][ , 1] <- theta_temp[[j]] <- 
-    rnorm(T_final, phi_temp[[j]], delta_temp[[j]])
-  
   
   # Per ora inizializzo tutti i gamma = 0, così da lasciare piena libertà di 
   #   movimento alla prima iterazione. Poi posso pensare di inizializzare anche
@@ -226,7 +188,7 @@ for (j in 1:p){
   gamma_res[[j]][ , , 1] <- gamma_temp[[j]][ , ] <- 0
   
   for (t in 1:T_final){
-    lab <- rho2lab(rCRP(4, 1))
+    lab <- rho2lab(rCRP(5, M))
     labels_temp[[j]][, t] <- labels_res[[j]][, t, 1] <- lab
   }
   beta_res[[j]][ , , 1] <- beta_temp[[j]] <- 
@@ -245,8 +207,7 @@ rm(j); rm(t)
 ### GIBBS SAMPLING ####
 ### ### ### ### ### ###
 # Ipotizzo di volerlo fare per gli uomini
-Y <- lapply(data_list_man, function(y) y[1:87, ])
-names(Y) <- substr(names(data_list_man), 1, 2)
+Y <- lapply(data, t)
 
 inizio <- Sys.time()
 
@@ -256,7 +217,7 @@ for (d in 2:n_iter){ # Ciclo sulle iterazioni
                             as.character(Sys.time()), "\n")}
   
   for (j in 1:p){ # Ciclo sui coefficienti
-    for (t in 1:87){ # Ciclo sugli istanti
+    for (t in 1:T_final){ # Ciclo sugli istanti
       ### ### ### ### ### ### ####
       ### ### UPDATE GAMMA ### ###
       
@@ -302,9 +263,9 @@ for (d in 2:n_iter){ # Ciclo sulle iterazioni
                                               spline_basis = S)
         
         
-      # In this version I must not reorder labels to avoid "gaps" anymore 
-      #   because now the value of the label is important because it 
-      #   corresponds to a particular curve of (beta_kj1, ..., beta_kjT).
+        # In this version I must not reorder labels to avoid "gaps" anymore 
+        #   because now the value of the label is important because it 
+        #   corresponds to a particular curve of (beta_kj1, ..., beta_kjT).
         
       } # Fine ciclo sulle osservazioni per labels
       
@@ -324,8 +285,8 @@ for (d in 2:n_iter){ # Ciclo sulle iterazioni
     beta_actual <- vapply(1:p, 
                           function(h) vapply(1:T_final, 
                                              function(s) beta_temp[[h]][labels_temp[[h]][ , s], s],
-                                             FUN.VALUE = double(4)),
-                          FUN.VALUE = matrix(1, 4, 87))
+                                             FUN.VALUE = double(n)),
+                          FUN.VALUE = matrix(1, n, T_final))
     
     # I obtain an array 4*101*87 to center the Y with respect to all the splines
     #   but the j-th
@@ -351,7 +312,7 @@ for (d in 2:n_iter){ # Ciclo sulle iterazioni
       #   the posterior in the part that comes from the likelihood
       sum_y_sig <- vapply(1:T_final, 
                           function(s) colSums( t(Y.tilde[s, , which(lab_j[, s] == k)])/
-                                                sigma[which(lab_j[, s] == k)]^2 ), 
+                                                 sigma[which(lab_j[, s] == k)]^2 ), 
                           FUN.VALUE = double(101))
       # Sum_x g_j(x)*"term just computed" --> contribution of the likelihood 
       #   to the posterior mean
@@ -383,7 +344,7 @@ for (d in 2:n_iter){ # Ciclo sulle iterazioni
     labels_res[[j]][ , , d] <- as.integer(labels_temp[[j]])
     gamma_res[[j]][ , , d] <- gamma_temp[[j]]
     beta_res[[j]][ , , d] <- beta_temp[[j]]
-  
+    
     
     
     
@@ -406,9 +367,9 @@ for (d in 2:n_iter){ # Ciclo sulle iterazioni
                                 A_delta = A_delta,
                                 eps = eps_delta)
     delta_res[[j]][d] <- delta_temp[[j]] <- tmp_out_delta$out
-    counter_ind[j] <- counter_ind[j] + as.integer(tmp_out_delta$ind)
+    # counter_ind[j] <- counter_ind[j] + as.integer(tmp_out_delta$ind)
     
-
+    
     ### ### ### ### ####
     ### UPDATE ALPHA ###
     alpha_res[[j]][d] <- alpha_temp[[j]] <-
@@ -443,4 +404,4 @@ fine <- Sys.time()
 
 exec_time <- difftime(fine, inizio)
 
-save.image("C:/Users/RomanoGi/Desktop/Bocconi/Ricerca/mort_rates-clustering/res/dynamic_on_beta/res_old_up_delta.RData")
+# save.image("C:/Users/RomanoGi/Desktop/Bocconi/Ricerca/mort_rates-clustering/res/dynamic_on_beta/sim_study/res4/res4.RData")

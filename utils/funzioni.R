@@ -211,6 +211,7 @@ up_label_i <- function(i, j,
   ### - newclustevalue: valore per il nuovo cluster
   ### - spline_basis: matrice con i valori delle basi spline
   
+  
   # Cluster in cui è l'i-esima osservazione
   # k <- which(vapply(rho_t, is.element, el = i, FUN.VALUE = FALSE))
   k <- lab_t[i]
@@ -226,9 +227,25 @@ up_label_i <- function(i, j,
   non_empty_clust <- unique(lab_tmi[lab_tmi > 0])
   
   means <- drop(spline_basis[, -j] %*% beta_i[-j])
-  means_list <- c()
+  beta_list <- c()
+  # tmp_means_list <- c()
   prob_cit_list <- c()
   check_list <- c()
+  
+  # I save this object because I will use it many times
+  spl_bas_j <- spline_basis[, j]
+  
+  # I create these objects here, but I will use it inside the loop.
+  #   Up to now I used to build them inside the loop, but it is not necessary
+  #   since it these quantities do NOT depend on "h" in any way.
+  if (!(identical(gamma_tp1, 'last time'))){
+    lab_tp1.R <- rep(-1, length(lab_t))
+    R_tp1 <- which(gamma_tp1 == 1)
+    lab_tp1.R[R_tp1] <- lab_tp1[R_tp1]
+  }
+  
+  # Same for this prob
+  prob_empty_clust <- M / (length(beta_cluster) - length(non_empty_clust))
   
   for (h in 1:length(beta_cluster)){
     # Devo costruire la partizione con l'i-esima osservazione inserita
@@ -251,7 +268,9 @@ up_label_i <- function(i, j,
     if (h  %in% non_empty_clust){ # se il cluster è già esistente, devo usare il beta di quel cluster
       prob_cit <- sum(lab_tmi == h)
     } else { # If the cluster to which i is assigned is an empty one
-      prob_cit <- M / (length(beta_cluster) - length(non_empty_clust))
+      prob_cit <- prob_empty_clust # M / (length(beta_cluster) - length(non_empty_clust))
+      # Now I compute this prob just once before the for loop because it does
+      #   NOT depend on "h".
       # The division is not actually necessary because it could go into the
       #   normalizing constant, but I'm explicitly including it so that I 
       #   keep track of the "true" procedure that I'm following
@@ -260,25 +279,30 @@ up_label_i <- function(i, j,
     # I beta che devo usare sono il vettore beta_i, sostituendo
     #   per il j-esimo coeff. il beta che ho appena calcolato.
     #
-    beta_i[j] <- beta
+    # beta_i[j] <- beta # I don't need this anymore
     
     # Nel paper di Page: indicatrice sulle partizioni ridotte
     #   per prima cosa devo trovare la partizione ridotta
     if (identical(gamma_tp1, 'last time')){
       check <- TRUE
     } else {
-      R_tp1 <- which(gamma_tp1 == 1)
+      # R_tp1 <- which(gamma_tp1 == 1) # I can create outside the loop, it does NOT depend on "h"
       
-      lab_tp1.R <- rep(-1, length(lab_t))
+      # lab_tp1.R <- rep(-1, length(lab_t)) # I can create outside the loop, it does NOT depend on "h"
       lab_t.h.R <- rep(-1, length(lab_t))
       
       lab_t.h.R[R_tp1] <- lab_t.h[R_tp1]
-      lab_tp1.R[R_tp1] <- lab_tp1[R_tp1]
+      # lab_tp1.R[R_tp1] <- lab_tp1[R_tp1] # I can create outside the loop, it does NOT depend on "h"
       
       check <- all(lab_t.h.R == lab_tp1.R)
     }
     
-    means_list <- cbind(means_list, means + beta*spline_basis[, j])
+    # means_list <- cbind(means_list, means + beta*spline_basis[, j])
+    # I change the part concerning the means so that I:
+    #   - call spline_basis[, j] just once, before the for loop
+    #   - I do the sum of means + beta... just once, after the for loop
+    beta_list <- c(beta_list, beta)
+    # tmp_means_list <- cbind(tmp_means_list, beta*spl_bas_j)
     prob_cit_list <- c(prob_cit_list, prob_cit)
     check_list <- c(check_list, check)
     
@@ -286,7 +310,9 @@ up_label_i <- function(i, j,
   
   
   logpnorm_list <- colSums(dnorm(Y_it, 
-                                 mean = means_list,
+                                 # mean = means_list,
+                                 # mean = means + tmp_means_list,
+                                 mean = means + outer(spl_bas_j, beta_list),
                                  sd = sigma_i,
                                  log = TRUE))
   
@@ -513,7 +539,7 @@ up_delta_j <- function(val_now,
   acc <- (log(runif(1, 0, 1)) < logprob) 
   out <- ifelse(acc, val_prop, val_now)
   
-  return(list(out = out, ind = indicator))
+  return(out)
 }
 
 
