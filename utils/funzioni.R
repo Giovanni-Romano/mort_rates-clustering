@@ -128,56 +128,122 @@ sq_exp_ker <- function(d, l){
 
 
 
+### ### ### ### ### ### ### ### ###
+##### Similarity function g_3() ####
+### ### ### ### ### ### ### ### ###
+# Firstly, I define the function for the univariate case (i.e. just one covariate)
+g3_univ <- function(s2, x, v02, m0){
+  n <- length(x)
+  out <- (1/2/pi)^(n/2) * (1/s2)^((n-1)/2) * sqrt(1/(s2+n*v02)) * 
+    exp( -(1/2/s2/(s2+n*v02)) * 
+           ( (s2+n*v02)*sum(x^2) - v02*(sum(x)^2) + 
+               s2*n*m0^2 - 2*s2*m0*sum(x)) 
+    )
+  
+  # It's faster written in this way than with any R function that I tried; 
+  #   probably because in my formula there is no inversion, since I know 
+  #   analytically found it.
+  
+  return(out)
+}
+
+# I define the function for the multivariate case (i.e. more than one covariate) 
+#   as the product of the univariate ones.
+g3_multiv <- function(s2_vec, X, v02_vec, m0_vec){
+  # X is a matrix whose columns are the covariates for all the n units
+  
+  tmp <- sapply(2:ncol(X), 
+                function(j) g3_univ(s2_vec[j], X[,j], v02_vec[j], m0_vec[j]))
+  
+  out <- prod(tmp)
+  
+  return(out)
+}
+
+
+
 ### ### ### ### ### ##
 #### UPDATE GAMMA ####
 ### ### ### ### ### ##
-up_gamma_i <- function(i, gamma, alpha_t, lab_t, lab_tm1){
+up_gamma_i <- function(i, gamma,
+                       alpha_t, 
+                       lab_t, lab_tm1,
+                       X_t, # matrix of covariates at time t (for all units)
+                       s2_vec, # vector of variances of covariates in g3
+                       m0_vec, # vector of means of the priors in g3
+                       v02_vec){ # vector of variances of the priors in g3
   
-  ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ###
-  ### - gamma è il vettore gamma_{t} più recente, quindi alcune componenti
-  ###     saranno già aggiornate all'iterazione (d) e altre saranno ancora alla (d-1)
-  ### - rho_tm1 è rho_{t-1}
-  ### - nota che rho_{t-1} sarà già aggiornato all'iter. (d) mentre rho_t è ancora
-  ###     alla vecchia iter (d-1)
-  
-  # R_t^{(+i)}: insieme di unità che rimangono fisse da t-1 a t unito a i
+  # R_t^{(+i)}: set of units that don't change cluster from t-1 to t united to {i}
+  # R_t^{(+i)}: set of units that don't change cluster from t-1 to t with {i} removed
   R_t <- which(gamma == 1)
   R_tmi <- R_t[R_t != i]
   R_tpi <- c(R_tmi, i)
   
-  # uso il ".R" per indicare le partizioni ridotte
-  lab_tm1.R <- rep(-1, length(lab_t))
-  lab_tm1.R[R_tpi] <- lab_tm1[R_tpi]
-  lab_t.R <- rep(-1, length(lab_t))
-  lab_t.R[R_tpi] <- lab_t[R_tpi]
+  # I use ".R" for the reduced partitions.
+  # "pi" stands for "plus i" and "mi" for "minus i".
+  lab_tm1.Rpi <- rep(-1, length(lab_t))
+  lab_tm1.Rpi[R_tpi] <- lab_tm1[R_tpi]
+  lab_t.Rpi <- rep(-1, length(lab_t))
+  lab_t.Rpi[R_tpi] <- lab_t[R_tpi]
+  # I need also the reduced partitions w.r.t. R_{t}^{(-i)} to compute 
+  #   the unnormalized prob.
+  lab_t.Rmi <- rep(-1, length(lab_t))
+  lab_t.Rmi[R_tmi] <- lab_t[R_tmi]
+  check <- all(lab_tm1.Rpi == lab_t.Rpi)
   
-  check <- all(lab_tm1.R == lab_t.R)
   
-  
-  # Vedi formula S.9 del materiale supplementare di Page
-  # Devo calcolare la predictive per l'i-esima osservazione data la 
-  #   partizione ridotta a R_{t}^{(-i)}
-  
-  
-  # Trova insieme della partizione con dentro i
-  j <- lab_t.R[i]
-  n.R <- sum(lab_t.R > 0) - 1
-  n_j <- sum(lab_t.R == j)
-  
-  if (n.R == 0) { # se la partizione a cui ci condizioniamo è vuota
-    ratio <- 1
-  } else {
-    if (n_j == 1) {
-      # se l'unità "i" è in un nuovo cluster
-      ratio <- M / (n.R + M)
-    } else { # se l'unità "i" è in un cluster già esistente
-      ratio <- (n_j - 1) / (n.R + M)
+  # If the reduced partitions (and hence the corresponding indicator is 1), 
+  #   then I have to compute the rest of the probability.
+  # On the other hand if the reduced partitions are different, then the 
+  #   corresponding indicator is 0 and hence all the prob. is 0 and I don't 
+  #   have to compute anything else.
+  if (check){ 
+    
+    # See formula S.9 Page's supplem. material.
+    # I have to compute the predictive distrib. for the i-th observation given
+    #   the reduced partition w.r.t. R_{t}^{(-i)}.
+    # In this case (w/ the PPMx) I don't have the closed form expression for the
+    #   predictive, hence I have to compute its kernel for all possible 
+    #   assignments of the i-th unit to the clusters in R_{t}^{(-i)}.
+    
+    # Find the number of non empty clusters in the reduced partition
+    non_empty_clust <- unique(lab_t.R[lab_t.R > 0])
+    
+    
+    # Find the subset j of the partition w/ i-th unit inside
+    j <- lab_t[i]
+    
+    unnorm_prob_list <- rep(-1, length(gamma))
+    if (n.Rpi == 0) { # if the partition to wich we condition is empty
+      ratio <- 1
+    } else {
+      for (h in non_empty_clust){
+        idx_h <- sum(lab_t.R == h)
+        n_h <- length(idx_h)
+        
+        if (n_h == 0) { # if i-th unit is in an empty cluster
+          unnorm_prob <- M / (length(gamma) - length(non_empty_clust)) * 
+            g3_multiv(s2_vec, X_t[i, ], v02_vec, m0_vec)
+        } else { # if i-th unit is in a non-empty cluster
+          unnorm_prob <- n_h * 
+            g3_multiv(s2_vec, X_t[c(idx_h, i), ], v02_vec, m0_vec) / 
+            g3_multiv(s2_vec, X_t[idx_h, ], v02_vec, m0_vec)
+        }
+
+        unnorm_prob_list[h] <- unnorm_prob
+      }
+      
+      norm_prob_list <- unnorm_prob_list / sum(unnorm_prob_list)
+      ratio <- norm_prob_list[j]
+
     }
+    
+    prob <- alpha_t / (alpha_t + (1 - alpha_t) * ratio)
+    gamma_it <- as.integer(runif(1) < prob)
+  } else {
+    prob <- 0 # not necessary, here just for conceptual clarity
+    gamma_it <- 0
   }
-  
-  prob <- alpha_t / (alpha_t + (1 - alpha_t) * ratio) * check
-  
-  gamma_it <- as.integer(runif(1) < prob)
   
   return(gamma_it)
 }
@@ -195,8 +261,11 @@ up_label_i <- function(i, j,
                        beta_cluster,
                        sigma_i,
                        lab_t, lab_tp1, gamma_tp1,
-                       spline_basis) {
-  
+                       spline_basis,
+                       X_t, # matrix of covariates at time t (for all units)
+                       s2_vec, # vector of variances of covariates in g3
+                       m0_vec, # vector of means of the priors in g3
+                       v02_vec){ # vector of variances of the priors in g3)
   ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ###
   ### - i: indice dell'unità che stiamo aggiornando
   ### - j: indice del coefficiente che stiamo aggiornando
@@ -228,7 +297,6 @@ up_label_i <- function(i, j,
   
   means <- drop(spline_basis[, -j] %*% beta_i[-j])
   beta_list <- c()
-  # tmp_means_list <- c()
   prob_cit_list <- c()
   check_list <- c()
   
@@ -247,6 +315,25 @@ up_label_i <- function(i, j,
   # Same for this prob
   prob_empty_clust <- M / (length(beta_cluster) - length(non_empty_clust))
   
+  # I create "rho version" of the clusters and I will use it inside the loop.
+  rho_list_tmi <- lab2rho(lab_tmi)
+  if (length(rho_list_tmi) < nrow(X_t)){
+    for (h in (length(rho_list_tmi)+1):(nrow(X_t))){
+      rho_list_tmi[[h]] <- integer(0)
+    }
+  }
+  
+  
+  # I compute gamma(|S^{-i}|) g(x_{kjt}^{-i \star}) for all clusters S, where 
+  #   I set it to 1 if S is empty 
+  gamma_times_g_list <- rep(1, nrow(X_t))
+  for (h in non_empty_clust){
+    gamma_times_g_list[h] <- gamma(NROW(S) * 
+                                    g3_multiv(s2_vec, 
+                                              X_t[lab_tmi == h, ], 
+                                              v02_vec, m0_vec))
+  }
+
   for (h in 1:length(beta_cluster)){
     # Devo costruire la partizione con l'i-esima osservazione inserita
     #   nell'h-esimo cluster
@@ -257,8 +344,8 @@ up_label_i <- function(i, j,
     #   ones), if the unit i is assigned to an empty cluster, I don't sample a 
     #   new value for the beta because I already have it. I think this 
     #   procedure is more similar to MacEachern&Muller1994 than to Neal200.
-    # I don't think this is a problem because at each iteration I update all
-    #   betas, also the ones corresponding to empty clusters.
+    # I don't think this is a problem because at each iteration of the Gibbs 
+    # then I update all betas, also the ones corresponding to empty clusters.
     beta <- beta_cluster[h]
     
     # Now the only difference between empty and non-empty clusters is the weight
@@ -266,9 +353,17 @@ up_label_i <- function(i, j,
     #   size of the cluster, otherwise it's M divided by the number of empty 
     #   clusters at that moment
     if (h  %in% non_empty_clust){ # se il cluster è già esistente, devo usare il beta di quel cluster
-      prob_cit <- sum(lab_tmi == h)
+      prob_cit <- M * gamma(sum(lab_tmi == h) + 1) * 
+        g3_multiv(s2_vec, 
+                  X_t[c(lab_tmi == h, i), ], 
+                  v02_vec, m0_vec) *
+        prod(gamma_times_g_list[-h])
     } else { # If the cluster to which i is assigned is an empty one
-      prob_cit <- prob_empty_clust # M / (length(beta_cluster) - length(non_empty_clust))
+      prob_cit <- M / (nrow(X_t) - length(non_empty_clust)) * 
+        g3_multiv(s2_vec, 
+                  X_t[i, ], 
+                  v02_vec, m0_vec) *
+        prod(gamma_times_g_list)
       # Now I compute this prob just once before the for loop because it does
       #   NOT depend on "h".
       # The division is not actually necessary because it could go into the
@@ -276,33 +371,21 @@ up_label_i <- function(i, j,
       #   keep track of the "true" procedure that I'm following
     }
     
-    # I beta che devo usare sono il vettore beta_i, sostituendo
-    #   per il j-esimo coeff. il beta che ho appena calcolato.
-    #
-    # beta_i[j] <- beta # I don't need this anymore
     
     # Nel paper di Page: indicatrice sulle partizioni ridotte
     #   per prima cosa devo trovare la partizione ridotta
     if (identical(gamma_tp1, 'last time')){
       check <- TRUE
     } else {
-      # R_tp1 <- which(gamma_tp1 == 1) # I can create outside the loop, it does NOT depend on "h"
       
-      # lab_tp1.R <- rep(-1, length(lab_t)) # I can create outside the loop, it does NOT depend on "h"
       lab_t.h.R <- rep(-1, length(lab_t))
-      
       lab_t.h.R[R_tp1] <- lab_t.h[R_tp1]
-      # lab_tp1.R[R_tp1] <- lab_tp1[R_tp1] # I can create outside the loop, it does NOT depend on "h"
       
       check <- all(lab_t.h.R == lab_tp1.R)
     }
     
-    # means_list <- cbind(means_list, means + beta*spline_basis[, j])
-    # I change the part concerning the means so that I:
-    #   - call spline_basis[, j] just once, before the for loop
-    #   - I do the sum of means + beta... just once, after the for loop
+    
     beta_list <- c(beta_list, beta)
-    # tmp_means_list <- cbind(tmp_means_list, beta*spl_bas_j)
     prob_cit_list <- c(prob_cit_list, prob_cit)
     check_list <- c(check_list, check)
     
