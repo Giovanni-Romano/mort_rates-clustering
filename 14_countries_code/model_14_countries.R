@@ -4,7 +4,7 @@ library(splines2)
 library(tidyverse)
 library(invgamma)
 
-load("C:/Users/RomanoGi/Desktop/Bocconi/Ricerca/death_rates_1x1/15_countries_preproc.RData")
+load("C:/Users/RomanoGi/Desktop/Bocconi/Ricerca/mort_rates-clustering/data/death_rates_1x1/15_countries_preproc.RData")
 setwd("C:/Users/RomanoGi/Desktop/Bocconi/Ricerca/mort_rates-clustering")
 source("funzioni.R")
 

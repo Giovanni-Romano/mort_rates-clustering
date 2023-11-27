@@ -33,6 +33,7 @@ rho2lab <- function(rho){
 #### DISTRIBUZIONE CRP ####
 ### ### ### ### ### ### ###
 dCRP <- function(size, M){
+  require(mggd)
   # size è il vettore con le cluster size e M è il parametro di concentrazione
   size <- size[size>0]
   M^NROW(size) * prod(factorial(size - 1)) / pochhammer(M, sum(size))
@@ -132,12 +133,12 @@ sq_exp_ker <- function(d, l){
 ##### Similarity function g_3() ####
 ### ### ### ### ### ### ### ### ###
 # Firstly, I define the function for the univariate case (i.e. just one covariate)
-g3_univ <- function(s2, x, v02, m0){
+g3_univ <- function(s2, x, v02, mu0){
   n <- length(x)
   out <- (1/2/pi)^(n/2) * (1/s2)^((n-1)/2) * sqrt(1/(s2+n*v02)) * 
     exp( -(1/2/s2/(s2+n*v02)) * 
            ( (s2+n*v02)*sum(x^2) - v02*(sum(x)^2) + 
-               s2*n*m0^2 - 2*s2*m0*sum(x)) 
+               s2*n*mu0^2 - 2*s2*mu0*sum(x)) 
     )
   
   # It's faster written in this way than with any R function that I tried; 
@@ -149,11 +150,14 @@ g3_univ <- function(s2, x, v02, m0){
 
 # I define the function for the multivariate case (i.e. more than one covariate) 
 #   as the product of the univariate ones.
-g3_multiv <- function(s2_vec, X, v02_vec, m0_vec){
+g3_multiv <- function(s2_vec, X, v02_vec, mu0_vec){
   # X is a matrix whose columns are the covariates for all the n units
   
-  tmp <- sapply(2:ncol(X), 
-                function(j) g3_univ(s2_vec[j], X[,j], v02_vec[j], m0_vec[j]))
+  # If X has just 1 row, then R does not consider him as a matrix, but as a 
+  #   vector. So, I have to force it to be a matrix.
+  if (is.null(dim(X))) {X <- matrix(X, nrow = 1)}
+  tmp <- sapply(1:ncol(X), 
+                function(j) g3_univ(s2_vec[j], X[,j], v02_vec[j], mu0_vec[j]))
   
   out <- prod(tmp)
   
@@ -170,23 +174,23 @@ up_gamma_i <- function(i, gamma,
                        lab_t, lab_tm1,
                        X_t, # matrix of covariates at time t (for all units)
                        s2_vec, # vector of variances of covariates in g3
-                       m0_vec, # vector of means of the priors in g3
+                       mu0_vec, # vector of means of the priors in g3
                        v02_vec){ # vector of variances of the priors in g3
   
-  # R_t^{(+i)}: set of units that don't change cluster from t-1 to t united to {i}
-  # R_t^{(+i)}: set of units that don't change cluster from t-1 to t with {i} removed
+  # R_t^{(-i)}: set of units that don't change cluster from t-1 to t with {i} removed --> Rtmi
+  # R_t^{(+i)}: set of units that don't change cluster from t-1 to t united to {i} --> Rtpi
   R_t <- which(gamma == 1)
   R_tmi <- R_t[R_t != i]
   R_tpi <- c(R_tmi, i)
   
   # I use ".R" for the reduced partitions.
   # "pi" stands for "plus i" and "mi" for "minus i".
-  lab_tm1.Rpi <- rep(-1, length(lab_t))
+  lab_tm1.Rpi <- rep(-1, length(lab_t)) # it's used to compute the indicator in formula (S.8) of suppl. mat.
   lab_tm1.Rpi[R_tpi] <- lab_tm1[R_tpi]
-  lab_t.Rpi <- rep(-1, length(lab_t))
+  lab_t.Rpi <- rep(-1, length(lab_t)) # it's used to compute the indicator in formula (S.8) of suppl. mat.
   lab_t.Rpi[R_tpi] <- lab_t[R_tpi]
   # I need also the reduced partitions w.r.t. R_{t}^{(-i)} to compute 
-  #   the unnormalized prob.
+  #   the unnormalized prob. relative to formula (S.9) in suppl. mat.
   lab_t.Rmi <- rep(-1, length(lab_t))
   lab_t.Rmi[R_tmi] <- lab_t[R_tmi]
   check <- all(lab_tm1.Rpi == lab_t.Rpi)
@@ -204,32 +208,34 @@ up_gamma_i <- function(i, gamma,
     #   the reduced partition w.r.t. R_{t}^{(-i)}.
     # In this case (w/ the PPMx) I don't have the closed form expression for the
     #   predictive, hence I have to compute its kernel for all possible 
-    #   assignments of the i-th unit to the clusters in R_{t}^{(-i)}.
+    #   assignments of the i-th unit to all clusters.
     
-    # Find the number of non empty clusters in the reduced partition
-    non_empty_clust <- unique(lab_t.R[lab_t.R > 0])
-    
-    
-    # Find the subset j of the partition w/ i-th unit inside
-    j <- lab_t[i]
-    
-    unnorm_prob_list <- rep(-1, length(gamma))
-    if (n.Rpi == 0) { # if the partition to wich we condition is empty
+    if (length(R_tmi) == 0) { # if the partition to wich we condition is empty
       ratio <- 1
     } else {
+      # Find the non-empty clusters in the reduced partition
+      non_empty_clust <- unique(lab_t.Rmi[lab_t.Rmi > 0])
+      
+      # Find the subset j of the partition w/ i-th unit inside
+      j <- lab_t[i]
+      
+      # Initialize the vector of unnormalized probabilities
+      unnorm_prob_list <- rep(NA, length(gamma))
+      # Fill the vector of unnormalized probabilities for the empty clusters.
+      #   These probabilities are all equal and they are equal to what written 
+      #   in formula (S.9) of Page's suppl. mat. divided by the nuyber of empty 
+      #   clusters (since we always have all "tables" open).
+      unnorm_prob_list[-non_empty_clust] <- 
+        M / (length(gamma) - length(non_empty_clust)) * 
+        g3_multiv(s2_vec, X_t[i, ], v02_vec, mu0_vec)
+      
       for (h in non_empty_clust){
-        idx_h <- sum(lab_t.R == h)
+        idx_h <- which(lab_t.Rmi == h)
         n_h <- length(idx_h)
-        
-        if (n_h == 0) { # if i-th unit is in an empty cluster
-          unnorm_prob <- M / (length(gamma) - length(non_empty_clust)) * 
-            g3_multiv(s2_vec, X_t[i, ], v02_vec, m0_vec)
-        } else { # if i-th unit is in a non-empty cluster
-          unnorm_prob <- n_h * 
-            g3_multiv(s2_vec, X_t[c(idx_h, i), ], v02_vec, m0_vec) / 
-            g3_multiv(s2_vec, X_t[idx_h, ], v02_vec, m0_vec)
-        }
-
+        unnorm_prob <- n_h * 
+          g3_multiv(s2_vec, X_t[c(idx_h, i), ], v02_vec, mu0_vec) / 
+          g3_multiv(s2_vec, X_t[idx_h, ], v02_vec, mu0_vec)
+          
         unnorm_prob_list[h] <- unnorm_prob
       }
       
@@ -264,7 +270,7 @@ up_label_i <- function(i, j,
                        spline_basis,
                        X_t, # matrix of covariates at time t (for all units)
                        s2_vec, # vector of variances of covariates in g3
-                       m0_vec, # vector of means of the priors in g3
+                       mu0_vec, # vector of means of the priors in g3
                        v02_vec){ # vector of variances of the priors in g3)
   ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ###
   ### - i: indice dell'unità che stiamo aggiornando
@@ -312,64 +318,33 @@ up_label_i <- function(i, j,
     lab_tp1.R[R_tp1] <- lab_tp1[R_tp1]
   }
   
-  # Same for this prob
-  prob_empty_clust <- M / (length(beta_cluster) - length(non_empty_clust))
-  
-  # I create "rho version" of the clusters and I will use it inside the loop.
-  rho_list_tmi <- lab2rho(lab_tmi)
-  if (length(rho_list_tmi) < nrow(X_t)){
-    for (h in (length(rho_list_tmi)+1):(nrow(X_t))){
-      rho_list_tmi[[h]] <- integer(0)
-    }
-  }
-  
   
   # I compute gamma(|S^{-i}|) g(x_{kjt}^{-i \star}) for all clusters S, where 
   #   I set it to 1 if S is empty 
   gamma_times_g_list <- rep(1, nrow(X_t))
   for (h in non_empty_clust){
-    gamma_times_g_list[h] <- gamma(NROW(S) * 
+    gamma_times_g_list[h] <- gamma(sum(lab_tmi == h)) * 
                                     g3_multiv(s2_vec, 
                                               X_t[lab_tmi == h, ], 
-                                              v02_vec, m0_vec))
+                                              v02_vec, mu0_vec)
   }
+  
+  
+  # I compute outside the probability of the i-th unit to be assigned to an 
+  #   empty cluster because it is the same for all the empty clusters and it 
+  #   does not depend on "h"
+  prob_empty_clust <- M / (length(beta_cluster) - length(non_empty_clust)) * 
+    g3_multiv(s2_vec, 
+              X_t[i, ], 
+              v02_vec, mu0_vec) *
+    prod(gamma_times_g_list)
+  
 
   for (h in 1:length(beta_cluster)){
     # Devo costruire la partizione con l'i-esima osservazione inserita
     #   nell'h-esimo cluster
     lab_t.h <- lab_tmi
     lab_t.h[i] <- h
-    
-    # Since here we always have the beta's for all the clusters (even the empty 
-    #   ones), if the unit i is assigned to an empty cluster, I don't sample a 
-    #   new value for the beta because I already have it. I think this 
-    #   procedure is more similar to MacEachern&Muller1994 than to Neal200.
-    # I don't think this is a problem because at each iteration of the Gibbs 
-    # then I update all betas, also the ones corresponding to empty clusters.
-    beta <- beta_cluster[h]
-    
-    # Now the only difference between empty and non-empty clusters is the weight
-    #   given by the CRP. If the cluster is not empty than its weight is the 
-    #   size of the cluster, otherwise it's M divided by the number of empty 
-    #   clusters at that moment
-    if (h  %in% non_empty_clust){ # se il cluster è già esistente, devo usare il beta di quel cluster
-      prob_cit <- M * gamma(sum(lab_tmi == h) + 1) * 
-        g3_multiv(s2_vec, 
-                  X_t[c(lab_tmi == h, i), ], 
-                  v02_vec, m0_vec) *
-        prod(gamma_times_g_list[-h])
-    } else { # If the cluster to which i is assigned is an empty one
-      prob_cit <- M / (nrow(X_t) - length(non_empty_clust)) * 
-        g3_multiv(s2_vec, 
-                  X_t[i, ], 
-                  v02_vec, m0_vec) *
-        prod(gamma_times_g_list)
-      # Now I compute this prob just once before the for loop because it does
-      #   NOT depend on "h".
-      # The division is not actually necessary because it could go into the
-      #   normalizing constant, but I'm explicitly including it so that I 
-      #   keep track of the "true" procedure that I'm following
-    }
     
     
     # Nel paper di Page: indicatrice sulle partizioni ridotte
@@ -385,6 +360,38 @@ up_label_i <- function(i, j,
     }
     
     
+    # Since here we always have the beta's for all the clusters (even the empty 
+    #   ones), if the unit i is assigned to an empty cluster, I don't sample a 
+    #   new value for the beta because I already have it. I think this 
+    #   procedure is more similar to MacEachern&Muller1994 than to Neal200.
+    # I don't think this is a problem because at each iteration of the Gibbs 
+    # then I update all betas, also the ones corresponding to empty clusters.
+    beta <- beta_cluster[h]
+    
+    
+    # I compute prob_cit only if check == TRUE, because otherwise it is useless,
+    #   since it will be multuplied by the indicator corrisponding to check, 
+    #   which is 0.
+    if (check){ # If the indicator (check) is equal to 1..
+      if (h  %in% non_empty_clust){ # se il cluster è già esistente, devo usare il beta di quel cluster
+        prob_cit <- M * gamma(sum(lab_tmi == h) + 1) * 
+          g3_multiv(s2_vec, 
+                    X_t[c(which(lab_tmi == h), i), ], 
+                    v02_vec, mu0_vec) *
+          prod(gamma_times_g_list[-h])
+      } else { # If the cluster to which i is assigned is an empty one
+        prob_cit <- prob_empty_clust
+        # Now I compute this prob just once before the for loop because it does
+        #   NOT depend on "h".
+      }
+    } else { # .. else if the indicator (check) is equal to 0..
+      # I put it to 0, but it does not matter the value because then it will be
+      #   multiplied by as.integer(check) that is 0.
+      prob_cit <- 0
+    }
+    
+    # No need to build beta_list, it will coincide with beta_cluster..
+    #   For the moment I leave it in the code for clarity.
     beta_list <- c(beta_list, beta)
     prob_cit_list <- c(prob_cit_list, prob_cit)
     check_list <- c(check_list, check)
@@ -392,9 +399,7 @@ up_label_i <- function(i, j,
   }
   
   
-  logpnorm_list <- colSums(dnorm(Y_it, 
-                                 # mean = means_list,
-                                 # mean = means + tmp_means_list,
+  logpnorm_list <- colSums(dnorm(Y_it,
                                  mean = means + outer(spl_bas_j, beta_list),
                                  sd = sigma_i,
                                  log = TRUE))
@@ -404,9 +409,6 @@ up_label_i <- function(i, j,
   # Almeno nelle prime iterazioni sembra che le prob siano tutte 0, 
   #   quindi devo lavorare in scala logaritmica. Per campionare dalle 
   #   log-prob uso il trick del max con la Gumbel.
-  # lll <- logp + min(abs(min(logp)), .Machine$double.xmax)
-  # gumbel <- -log(-log(runif(length(lll))))
-  # lll <- lll + gumbel
   gumbel <- -log(-log(runif(length(logp))))
   lll <- logp + gumbel
   
@@ -694,6 +696,147 @@ up_alpha_j <- function(sum_data,
   out <- rbeta(1, 
                priorshape1 + sum_data, 
                priorshape2 + n - sum_data)
+  
+  return(out)
+}
+
+
+
+
+
+### ### ### ### ### ### ### ###
+#### UPDATE S2 (param. g3) ####
+### ### ### ### ### ### ### ###
+# To compute the acceptance probability I need the likelihood of the PPMx for
+#   s2 (it is not sufficient the kernel of the distribution of the PPM, since 
+#   s2 will probably appear also in the normalizing constant).
+# I'm not able to normalize analitycally the likelihood, so I should do that 
+#   numerically. It is usually unfeasible because the number of possible 
+#   partitions increases as n^n, but in the simulation study n is just 3, so 
+#   it is feasible.
+unnorm_ppmx <- function(labs,
+                        M,
+                        # g3_multiv. parameters
+                        s2_vec, 
+                        X, 
+                        v02_vec, 
+                        mu0_vec){
+  ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ###
+  ### - labs: vector with the labels of the clusters for which we want to 
+  ###         compute the unnorm_ppmx
+  ### - M: concentration parameter of the Dirichlet process
+  ### - s2_vec: vector of variances of the marginal likelihood
+  ### - X: matrix with the covariates for each unit i
+  ### - mu0_vec: vector of means of the marginal likelihood
+  ### - v02_vec: vector of variances of the distribution used to marginalize 
+  ###             the likelihood
+  
+  rho <- lab2rho(labs)
+  
+  # I need labs to be w/o gaps, so I can't have a label vector like c(1, 3, 1),
+  #   but it should be c(1, 2, 1).
+  rho <- rho[lapply(rho, length) > 0]
+  
+  
+  tmp <- sapply(rho, function(r) M * gamma(length(r)) * g3_multiv(s2_vec, 
+                                                                  X[r, ], 
+                                                                  v02_vec, 
+                                                                  mu0_vec))
+  
+  out <- prod(tmp)
+  
+  return(out)
+}
+
+norm_ppmx <- function(labs,
+                      M,
+                      # g3_multiv. parameters
+                      s2_vec, 
+                      X, 
+                      v02_vec, 
+                      mu0_vec){
+  require(partitions)
+  
+  n <- length(labs)
+  
+  parts <- cbind(labs, setparts(n))
+  
+  # Compute the likelihood for each partition
+  out <- apply(parts, 2, function(p) unnorm_ppmx(p,
+                                                 M,
+                                                 s2_vec,
+                                                 X,
+                                                 v02_vec,
+                                                 mu0_vec))
+  
+  return(out[1]/sum(out[-1]))
+}
+
+# Function for the RW Metropolis (RWM) for the parameter s2 of the similarity 
+#   function g3(), that is the variance of the covariates.
+# It is written to update one param. at a time.
+up_s2.RWM <- function(s2_vec,
+                      idx_cov,
+                      eps,
+                      A_s2,
+                      labels,
+                      M,
+                      X,
+                      mu0_vec,
+                      v02_vec){
+  ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ###
+  ### - s2_vec: vector of variances of the likelihood
+  ### - idx_cov: index of the covariate for which we want to update s2
+  ### - eps: RW step size
+  ### - A_s2: hyperparam of prior on s2
+  ### - labels: matrix with the labels of the clusters for each time t and unit i
+  ### - M: concentration parameter of the Dirichlet process
+  ### - X: 3D-array with the covariates for each time t and unit i
+  ### - mu0_vec: vector of means of the marginal likelihood
+  ### - v02_vec: vector of variances of the distribution used to marginalize 
+  ###             the likelihood
+  
+  # The current value for the s2 to update is in the idx_cov-th position of s2_vec
+  val_now <- s2_vec[idx_cov]
+  
+  # Sample proposed value
+  val_prop <- runif(1, val_now - eps, val_now + eps)
+  
+  # Indicator to check if proposed values are in the domain
+  indicator <- (val_prop > 0 & val_prop < A_s2)
+  
+  if (indicator){
+    # Likelihood of current value
+    s2_vec_now <- s2_vec # no need to create s2_vec_now; here just for clarity
+    likel_now <- sum(vapply(1:10, 
+                            function(yr) log(norm_ppmx(labs = labels[, yr],
+                                                       M = M,
+                                                       s2_vec = s2_vec_now, 
+                                                       X = X[ , yr, ], 
+                                                       v02_vec = v02_vec, 
+                                                       mu0_vec = mu0_vec)),
+                            FUN.VALUE = numeric(1))
+    )
+    
+    # Likelihood of the proposed value
+    s2_vec_prop <- s2_vec; s2_vec_prop[idx_cov] <- val_prop
+    likel_prop <- sum(vapply(1:10, 
+                             function(yr) log(norm_ppmx(labs = labels[, yr],
+                                                        M = M,
+                                                        s2_vec = s2_vec_prop,
+                                                        X = X[, yr, ], 
+                                                        v02_vec = v02_vec, 
+                                                        mu0_vec = mu0_vec)),
+                             FUN.VALUE = numeric(1))
+    )
+    logprob <- min(likel_prop - likel_now, 0)
+  } else {
+    logprob <- -Inf
+  }
+  
+  # Create output
+  acc <- (log(runif(1, 0, 1)) < logprob) 
+  out <- ifelse(acc, val_prop, val_now)
   
   return(out)
 }

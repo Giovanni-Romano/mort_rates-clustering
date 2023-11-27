@@ -1,18 +1,15 @@
 rm(list=ls())
-# library(tidyverse)
 library(splines2)
-# library(tidyverse)
-# library(invgamma)
 
 setwd("C:/Users/RomanoGi/Desktop/Bocconi/Ricerca/mort_rates-clustering")
-load("simdata/simdata4.Rdata")
-source("funzioni.R")
+load("C:/Users/RomanoGi/Desktop/Bocconi/Ricerca/mort_rates-clustering/data/simdata_PPMx/simulated_data.Rdata")
+source("utils/funzioni.R")
 
 
 set.seed(4238)
 
 
-data <- sim2$data
+data <- out$data
 str(data)
 
 ### ### ### ### ### ###
@@ -24,7 +21,7 @@ ages_no0 <- ages[-1]
 
 # Construction of the spline basis functions
 S.temp <- bSpline(ages_no0, 
-                  knots = knots, 
+                  knots = out$knots, 
                   degree = 2, 
                   intercept = TRUE)
 # Il numero di basi B-spline è pari al numero di nodi interni più l'ordine
@@ -41,7 +38,7 @@ for (k in 1:K){
 #   aggiungo anche l'età 0 e la base attiva solo in 0.
 S <- rbind(c(1, rep(0, k)),
            cbind(rep(0, length(ages_no0)), S.temp)
-)
+           )
 
 
 
@@ -52,18 +49,18 @@ S <- rbind(c(1, rep(0, k)),
 ### ### ### ### ### ### ### ### ### ### ###
 
 # Numero istanti temporali
-T_final <- ncol(data[[1]]); T_final
+T_final <- out$T_final; T_final
 # Numero stati considerati
-n <- length(data); n
+n <- out$n; n
 # Numero coeff
 p <- ncol(S); p
 # Varianza delle osservazioni fissata
-sigma <- sigma_vec; sigma
+sigma <- out$sigma_vec; sigma
 # Iperparametri della prior dell'ultimo layer
 m0 <- -4; s02 <- 1^2
 # Uniforms' hyperparameters
 #   Following Page's idea in paragraph 2.5 I choose these hyperparams
-A_delta <- 2
+A_delta <- 4 # It was 2, but from traceplots I notice it's too small for v02 = 0.5
 A_xi <- 5
 # Hyperparams for the Beta prior on alpha
 a_alpha <- 2; b_alpha <- 3
@@ -75,6 +72,29 @@ SIGMA <- outer(1:T_final, 1:T_final, function(x1, x2) sq_exp_ker(x1-x2, l = l))
 cholSIG <- chol(SIGMA)
 SIGMAinv <- chol2inv(cholSIG)
 
+# Matrix of covariates
+# X <- abind::abind(appl(y(out$x1, 2, scale), apply(out$x2, 2, scale), 
+#                   rev.along = 0)
+X <- abind::abind((out$x1 - mean(out$x1))/sd(out$x1), 
+                  (out$x2 - mean(out$x2))/sd(out$x2),
+                  rev.along = 0)
+dimnames(X)[[3]] <- c("x1", "x2")
+
+# g3() - similarity function - parameters
+# For the moment I use the same value for all the covariates, but maybe 
+#   it could be better to use different values for different covariates.
+
+# Mean of the marginal likelihood
+mu0 <- 0 # Because we standardize the covariates.
+
+# Variance of the distribution that we use to marginalize the likelihood
+v02 <- 1 # In Muller&Quintana&Rosner2011 they set v02 as 10 times the 
+          #   empirical variance of the covariates, that we standardize.
+          #   So, in our case, v02 = 10*1 = 10.
+# Hyperpar. of the prior on the variance of the likelihood, that is the 
+#   right extreme of a Uniform distribution.
+A_s2 <- 10 # I don't know how to set it; I start with a value (10) that should
+            # be enough (probably too much).
 
 
 
@@ -100,6 +120,8 @@ eps_xi <- A_xi
 #   but w/o completely avoid longer steps (as it would happen with a Unif RW
 #   with eps = 0.1).
 eps_delta <- 0.1
+
+eps_s2 <- A_s2/4 # W/ A_s2 = 10, I think that eps_s2 = A_s2 could be too large
 
 
 
@@ -147,6 +169,9 @@ alpha_res <- replicate(p,
                        simplify = FALSE)
 
 lambda_res <- xi_res <- rep(NA, n_iter)
+s2_res <- replicate(p,
+                    array(NA, dim = c(n_iter, 2)),
+                    simplify = FALSE)
 
 
 # Temp objects
@@ -162,7 +187,9 @@ gamma_temp <- labels_temp <-
 phi_temp <- delta_temp <- replicate(p, list(NA))
 alpha_temp <- replicate(p, list(NA))
 lambda_temp <- xi_temp <- NA
-
+s2_temp <- replicate(p, 
+                     rep(NA, 2),
+                     simplify = FALSE)
 
 
 ### ### ### ### ### ###
@@ -174,6 +201,8 @@ lambda_res[1] <- lambda_temp <-
   rnorm(1, mean = m0, sd = sqrt(s02))
 
 for (j in 1:p){
+  s2_temp[[j]] <- s2_res[[j]][1, ] <- runif(2, min = 0, max = A_s2)
+  
   delta_res[[j]][1] <- delta_temp[[j]] <- 
     runif(1, 0.1, A_delta)
   phi_res[[j]][1] <- phi_temp[[j]] <- 
@@ -188,7 +217,7 @@ for (j in 1:p){
   gamma_res[[j]][ , , 1] <- gamma_temp[[j]][ , ] <- 0
   
   for (t in 1:T_final){
-    lab <- rho2lab(rCRP(5, M))
+    lab <- rho2lab(rCRP(n, M))
     labels_temp[[j]][, t] <- labels_res[[j]][, t, 1] <- lab
   }
   beta_res[[j]][ , , 1] <- beta_temp[[j]] <- 
@@ -206,15 +235,11 @@ rm(j); rm(t)
 ### ### ### ### ### ###
 ### GIBBS SAMPLING ####
 ### ### ### ### ### ###
-# Ipotizzo di volerlo fare per gli uomini
 Y <- lapply(data, t)
-
-inizio <- Sys.time()
+# debug(up_s2.RWM)
+inizio <- last_time <- Sys.time()
 
 for (d in 2:n_iter){ # Ciclo sulle iterazioni
-  
-  if ((d %% 100) == 0) {cat(d, difftime(Sys.time(), inizio), 
-                            as.character(Sys.time()), "\n")}
   
   for (j in 1:p){ # Ciclo sui coefficienti
     for (t in 1:T_final){ # Ciclo sugli istanti
@@ -235,7 +260,11 @@ for (d in 2:n_iter){ # Ciclo sulle iterazioni
                                               gamma = gamma_temp[[j]][, t], 
                                               alpha_t = alpha_temp[[j]],
                                               lab_t = labels_temp[[j]][, t],
-                                              lab_tm1 = labels_temp[[j]][, t-1])
+                                              lab_tm1 = labels_temp[[j]][, t-1],
+                                              X_t = X[ , t, ],
+                                              s2_vec = s2_temp[[j]],
+                                              mu0_vec = rep(mu0, 2),
+                                              v02_vec = rep(v02, 2))
         }
       } # Fine ciclo sulle osservazioni per gamma
       
@@ -260,7 +289,11 @@ for (d in 2:n_iter){ # Ciclo sulle iterazioni
                                               lab_tp1 = labels_temp[[j]][,t+1], 
                                               gamma_tp1 = if (t == T_final) {'last time'} 
                                               else {gamma_temp[[j]][, t+1]},
-                                              spline_basis = S)
+                                              spline_basis = S,
+                                              X_t = X[ , t, ],
+                                              s2_vec = s2_temp[[j]],
+                                              mu0_vec = rep(mu0, 2),
+                                              v02_vec = rep(v02, 2))
         
         
         # In this version I must not reorder labels to avoid "gaps" anymore 
@@ -281,14 +314,14 @@ for (d in 2:n_iter){ # Ciclo sulle iterazioni
     ### ### ### ### ### ### ###
     
     # I get the beta for every coeff, for every country and for every time
-    # It's an array 4*101*87
+    # It's an array 3*10*6
     beta_actual <- vapply(1:p, 
                           function(h) vapply(1:T_final, 
                                              function(s) beta_temp[[h]][labels_temp[[h]][ , s], s],
                                              FUN.VALUE = double(n)),
                           FUN.VALUE = matrix(1, n, T_final))
     
-    # I obtain an array 4*101*87 to center the Y with respect to all the splines
+    # I obtain an array 10*101*3 to center the Y with respect to all the splines
     #   but the j-th
     centering <- simplify2array(apply(beta_actual, 1, function(B) B[, -j]%*%t(S[, -j]), simplify = FALSE))
     # I change the str() of Y to center it simply
@@ -341,7 +374,7 @@ for (d in 2:n_iter){ # Ciclo sulle iterazioni
     
     
     # Aggiungo gli elementi anche negli oggetti non-temp
-    labels_res[[j]][ , , d] <- as.integer(labels_temp[[j]])
+    labels_res[[j]][ , , d] <- labels_temp[[j]]
     gamma_res[[j]][ , , d] <- gamma_temp[[j]]
     beta_res[[j]][ , , d] <- beta_temp[[j]]
     
@@ -360,14 +393,12 @@ for (d in 2:n_iter){ # Ciclo sulle iterazioni
     
     ### ### ### ### ####
     ### UPDATE DELTA ###
-    tmp_out_delta <- up_delta_j(val_now = delta_temp[[j]],
-                                beta_j = beta_temp[[j]],
-                                phi_j = phi_temp[[j]],
-                                SIGchol = cholSIG,
-                                A_delta = A_delta,
-                                eps = eps_delta)
-    delta_res[[j]][d] <- delta_temp[[j]] <- tmp_out_delta$out
-    # counter_ind[j] <- counter_ind[j] + as.integer(tmp_out_delta$ind)
+    delta_res[[j]][d] <- delta_temp[[j]] <- up_delta_j(val_now = delta_temp[[j]],
+                                                       beta_j = beta_temp[[j]],
+                                                       phi_j = phi_temp[[j]],
+                                                       SIGchol = cholSIG,
+                                                       A_delta = A_delta,
+                                                       eps = eps_delta)
     
     
     ### ### ### ### ####
@@ -377,6 +408,28 @@ for (d in 2:n_iter){ # Ciclo sulle iterazioni
                  n * T_final,
                  a_alpha,
                  b_alpha)
+    
+    
+    ### ### ### ### #
+    ### UPDATE S2 ###
+    s2_temp[[j]][1] <- s2_res[[j]][d, 1] <-  up_s2.RWM(s2_vec = s2_temp[[j]],
+                                                       idx_cov = 1,
+                                                       eps = eps_s2,
+                                                       A_s2 = A_s2,
+                                                       labels = labels_temp[[j]],
+                                                       M = M,
+                                                       X = X,
+                                                       mu0_vec = rep(mu0, 2),
+                                                       v02_vec = rep(v02, 2))
+    s2_temp[[j]][2] <- s2_res[[j]][d, 2] <- up_s2.RWM(s2_vec = s2_temp[[j]],
+                                                      idx_cov = 2,
+                                                      eps = eps_s2,
+                                                      A_s2 = A_s2,
+                                                      labels = labels_temp[[j]],
+                                                      M = M,
+                                                      X = X,
+                                                      mu0_vec = rep(mu0, 2),
+                                                      v02_vec = rep(v02, 2))
   } # END OF FOR LOOP OVER COEFFICIENTS "j"
   
   ### ### ### ### ### #
@@ -388,7 +441,7 @@ for (d in 2:n_iter){ # Ciclo sulle iterazioni
               s02 = s02)
   
   
-  ### ### ### ### ####
+  ### ### ### ### #
   ### UPDATE XI ###
   xi_res[d] <- xi_temp <- 
     up_sd.RWM(val_now = xi_temp,
@@ -398,10 +451,23 @@ for (d in 2:n_iter){ # Ciclo sulle iterazioni
               hyppar = A_xi)
   
   
+  # Print the time passed since the beginning of the simulation and since the
+  #   last tot iteration.
+  if ((d %% 100) == 1) {
+    now <- Sys.time()
+    cat("iter. ", d-1, " fatta",
+        "\n tempo passato da inizio: ", difftime(now, inizio, units = "mins"),
+        "\n tempo passato da ultima iter: ", difftime(now, last_time, units = "mins"), " mins", 
+        "\n ora print: ", format(Sys.time(), "%H:%M:%S"), 
+        "\n\n",
+        sep = "")
+    last_time <- now
+  }
+
 } # END OF FOR LOOP OVER ITERATIONS "d"
 
 fine <- Sys.time()
 
 exec_time <- difftime(fine, inizio)
 
-# save.image("C:/Users/RomanoGi/Desktop/Bocconi/Ricerca/mort_rates-clustering/res/dynamic_on_beta/sim_study/res4/res4.RData")
+# save.image("C:/Users/RomanoGi/Desktop/Bocconi/Ricerca/mort_rates-clustering/res/dynamic_on_beta/PPMx/sim_study/v02_1/res_v02_1.RData")
