@@ -153,31 +153,40 @@ up_gamma_i <- function(i, gamma, alpha_t, lab_t, lab_tm1){
   
   check <- all(lab_tm1.R == lab_t.R)
   
-  
-  # Vedi formula S.9 del materiale supplementare di Page
-  # Devo calcolare la predictive per l'i-esima osservazione data la 
-  #   partizione ridotta a R_{t}^{(-i)}
-  
-  
-  # Trova insieme della partizione con dentro i
-  j <- lab_t.R[i]
-  n.R <- sum(lab_t.R > 0) - 1
-  n_j <- sum(lab_t.R == j)
-  
-  if (n.R == 0) { # se la partizione a cui ci condizioniamo è vuota
-    ratio <- 1
-  } else {
-    if (n_j == 1) {
-      # se l'unità "i" è in un nuovo cluster
-      ratio <- M / (n.R + M)
-    } else { # se l'unità "i" è in un cluster già esistente
-      ratio <- (n_j - 1) / (n.R + M)
+  # If check is false it's useless to do all computations, because the 
+  #   probability will be always 0.
+  if (check){
+    # Vedi formula S.9 del materiale supplementare di Page
+    # Devo calcolare la predictive per l'i-esima osservazione data la 
+    #   partizione ridotta a R_{t}^{(-i)}
+    
+    
+    # Trova insieme della partizione con dentro i
+    j <- lab_t.R[i]
+    n.R <- sum(lab_t.R > 0) - 1
+    n_j <- sum(lab_t.R == j)
+    
+    if (n.R == 0) { # se la partizione a cui ci condizioniamo è vuota
+      ratio <- 1
+    } else {
+      if (n_j == 1) {
+        # se l'unità "i" è in un nuovo cluster
+        ratio <- M / (n.R + M)
+      } else { # se l'unità "i" è in un cluster già esistente
+        ratio <- (n_j - 1) / (n.R + M)
+      }
     }
+    
+    prob <- alpha_t / (alpha_t + (1 - alpha_t) * ratio) * check
+    
+    gamma_it <- as.integer(runif(1) < prob)
+    
+  } else {
+    gamma_it <- 0
   }
   
-  prob <- alpha_t / (alpha_t + (1 - alpha_t) * ratio) * check
   
-  gamma_it <- as.integer(runif(1) < prob)
+  
   
   return(gamma_it)
 }
@@ -253,33 +262,6 @@ up_label_i <- function(i, j,
     lab_t.h <- lab_tmi
     lab_t.h[i] <- h
     
-    # Since here we always have the beta's for all the clusters (even the empty 
-    #   ones), if the unit i is assigned to an empty cluster, I don't sample a 
-    #   new value for the beta because I already have it. I think this 
-    #   procedure is more similar to MacEachern&Muller1994 than to Neal200.
-    # I don't think this is a problem because at each iteration I update all
-    #   betas, also the ones corresponding to empty clusters.
-    beta <- beta_cluster[h]
-    
-    # Now the only difference between empty and non-empty clusters is the weight
-    #   given by the CRP. If the cluster is not empty than its weight is the 
-    #   size of the cluster, otherwise it's M divided by the number of empty 
-    #   clusters at that moment
-    if (h  %in% non_empty_clust){ # se il cluster è già esistente, devo usare il beta di quel cluster
-      prob_cit <- sum(lab_tmi == h)
-    } else { # If the cluster to which i is assigned is an empty one
-      prob_cit <- prob_empty_clust # M / (length(beta_cluster) - length(non_empty_clust))
-      # Now I compute this prob just once before the for loop because it does
-      #   NOT depend on "h".
-      # The division is not actually necessary because it could go into the
-      #   normalizing constant, but I'm explicitly including it so that I 
-      #   keep track of the "true" procedure that I'm following
-    }
-    
-    # I beta che devo usare sono il vettore beta_i, sostituendo
-    #   per il j-esimo coeff. il beta che ho appena calcolato.
-    #
-    # beta_i[j] <- beta # I don't need this anymore
     
     # Nel paper di Page: indicatrice sulle partizioni ridotte
     #   per prima cosa devo trovare la partizione ridotta
@@ -295,6 +277,37 @@ up_label_i <- function(i, j,
       # lab_tp1.R[R_tp1] <- lab_tp1[R_tp1] # I can create outside the loop, it does NOT depend on "h"
       
       check <- all(lab_t.h.R == lab_tp1.R)
+    }
+    
+    # Since here we always have the beta's for all the clusters (even the empty 
+    #   ones), if the unit i is assigned to an empty cluster, I don't sample a 
+    #   new value for the beta because I already have it. I think this 
+    #   procedure is more similar to MacEachern&Muller1994 than to Neal200.
+    # I don't think this is a problem because at each iteration I update all
+    #   betas, also the ones corresponding to empty clusters.
+    beta <- beta_cluster[h]
+    
+    
+    # If check is false, then it's useless to compute prob_cit because the 
+    #   total probability will however be 0. So I set prob_cit = 0 (but every 
+    #   constant would be ok, because it will be multiplied by 0).
+    if (check){
+      # Now the only difference between empty and non-empty clusters is the weight
+      #   given by the CRP. If the cluster is not empty than its weight is the 
+      #   size of the cluster, otherwise it's M divided by the number of empty 
+      #   clusters at that moment
+      if (h  %in% non_empty_clust){ # se il cluster è già esistente, devo usare il beta di quel cluster
+        prob_cit <- sum(lab_tmi == h)
+      } else { # If the cluster to which i is assigned is an empty one
+        prob_cit <- prob_empty_clust # M / (length(beta_cluster) - length(non_empty_clust))
+        # Now I compute this prob just once before the for loop because it does
+        #   NOT depend on "h".
+        # The division is not actually necessary because it could go into the
+        #   normalizing constant, but I'm explicitly including it so that I 
+        #   keep track of the "true" procedure that I'm following
+      }
+    } else {
+      prob_cit <- 0
     }
     
     # means_list <- cbind(means_list, means + beta*spline_basis[, j])
@@ -321,9 +334,6 @@ up_label_i <- function(i, j,
   # Almeno nelle prime iterazioni sembra che le prob siano tutte 0, 
   #   quindi devo lavorare in scala logaritmica. Per campionare dalle 
   #   log-prob uso il trick del max con la Gumbel.
-  # lll <- logp + min(abs(min(logp)), .Machine$double.xmax)
-  # gumbel <- -log(-log(runif(length(lll))))
-  # lll <- lll + gumbel
   gumbel <- -log(-log(runif(length(logp))))
   lll <- logp + gumbel
   
