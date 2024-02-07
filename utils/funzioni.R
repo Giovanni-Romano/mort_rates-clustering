@@ -1,5 +1,5 @@
-library(tidyverse)
-library(mvtnorm)
+# library(tidyverse)
+# library(mvtnorm)
 library(mvnfast)
 library(mggd)
 
@@ -111,10 +111,27 @@ are.partitions.equal <- function(part1, part2){
 
 
 
+### ### ### ### ### ### ### ### ###
+#### SQUARED EXPONENTIAL KERNEL ####
+### ### ### ### ### ### ### ### ###
+sq_exp_ker <- function(d, l){
+  ### ### ### ### ### ### ### ### ### ### ###
+  ### - compute the squared exponential kernel in d = x1 - x2: exp{-(d^2)/(2l^2)}
+  ### - l control the smoothness of the kernel (the larger l and the greater the smoothness)
+  ### - the term to control the scale (which is included for example in BDA3 is 
+  ###     not considered here because I take it outside the kernel and i put a 
+  ###     prior on it)
+  exp( - d^2 / (2*l^2) )
+}
+
+
+
+
+
 ### ### ### ### ### ##
 #### UPDATE GAMMA ####
 ### ### ### ### ### ##
-up_gamma_i <- function(i, gamma, alpha_t, lab_t, lab_tm1){
+up_gamma_i <- function(i, gamma, alpha_t, lab_t, lab_tm1, M){
   
   ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ###
   ### - gamma è il vettore gamma_{t} più recente, quindi alcune componenti
@@ -129,38 +146,47 @@ up_gamma_i <- function(i, gamma, alpha_t, lab_t, lab_tm1){
   R_tpi <- c(R_tmi, i)
   
   # uso il ".R" per indicare le partizioni ridotte
-  lab_tm1.R <- rep(-1, length(lab_t))
-  lab_tm1.R[R_tpi] <- lab_tm1[R_tpi]
   lab_t.R <- rep(-1, length(lab_t))
   lab_t.R[R_tpi] <- lab_t[R_tpi]
   
-  check <- all(lab_tm1.R == lab_t.R)
+  adj_tm1 <- outer(lab_tm1[R_tpi], lab_tm1[R_tpi], function(x, y) as.integer(x == y))
+  adj_t <- outer(lab_t[R_tpi], lab_t[R_tpi], function(x, y) as.integer(x == y))
+  check <- all(adj_tm1 == adj_t)
   
-  
-  # Vedi formula S.9 del materiale supplementare di Page
-  # Devo calcolare la predictive per l'i-esima osservazione data la 
-  #   partizione ridotta a R_{t}^{(-i)}
-  
-  
-  # Trova insieme della partizione con dentro i
-  j <- lab_t.R[i]
-  n.R <- sum(lab_t.R > 0) - 1
-  n_j <- sum(lab_t.R == j)
-  
-  if (n.R == 0) { # se la partizione a cui ci condizioniamo è vuota
-    ratio <- 1
-  } else {
-    if (n_j == 1) {
-      # se l'unità "i" è in un nuovo cluster
-      ratio <- M / (n.R + M)
-    } else { # se l'unità "i" è in un cluster già esistente
-      ratio <- (n_j - 1) / (n.R + M)
+  # If check is false it's useless to do all computations, because the 
+  #   probability will be always 0.
+  if (check){
+    # Vedi formula S.9 del materiale supplementare di Page
+    # Devo calcolare la predictive per l'i-esima osservazione data la 
+    #   partizione ridotta a R_{t}^{(-i)}
+    
+    
+    # Trova insieme della partizione con dentro i
+    j <- lab_t.R[i]
+    n.R <- sum(lab_t.R > 0) - 1
+    n_j <- sum(lab_t.R == j)
+    
+    if (n.R == 0) { # se la partizione a cui ci condizioniamo è vuota
+      ratio <- 1
+    } else {
+      if (n_j == 1) {
+        # se l'unità "i" è in un nuovo cluster
+        ratio <- M / (n.R + M)
+      } else { # se l'unità "i" è in un cluster già esistente
+        ratio <- (n_j - 1) / (n.R + M)
+      }
     }
+    
+    prob <- alpha_t / (alpha_t + (1 - alpha_t) * ratio) * check
+    
+    gamma_it <- as.integer(runif(1) < prob)
+    
+  } else {
+    gamma_it <- 0
   }
   
-  prob <- alpha_t / (alpha_t + (1 - alpha_t) * ratio) * check
   
-  gamma_it <- as.integer(runif(1) < prob)
+  
   
   return(gamma_it)
 }
@@ -179,7 +205,8 @@ up_label_i <- function(i, j,
                        sigma_i,
                        lab_t, lab_tp1, gamma_tp1,
                        newclustervalue,
-                       spline_basis) {
+                       spline_basis,
+                       M) {
   
   ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ###
   ### - i: indice dell'unità che stiamo aggiornando
@@ -195,6 +222,8 @@ up_label_i <- function(i, j,
   ### - newclustevalue: valore per il nuovo cluster
   ### - spline_basis: matrice con i valori delle basi spline
   
+  n <- length(lab_t)
+  
   # Cluster in cui è l'i-esima osservazione
   # k <- which(vapply(rho_t, is.element, el = i, FUN.VALUE = FALSE))
   k <- lab_t[i]
@@ -205,89 +234,117 @@ up_label_i <- function(i, j,
   lab_tmi <- lab_t
   lab_tmi[i] <- -1
   
+  # Clusters with at least one observetion assigned to it; I need this to choose
+  #   if its dCRP is cluster size or M
+  non_empty_clust <- unique(lab_tmi[lab_tmi > 0])
   
-  # whichclusters <- which(vapply(rho_tmi, function(x) length(x)>0, FUN.VALUE = FALSE)) # cluster esistenti
   whichclusters <- unique(lab_tmi[lab_tmi > 0])
-  whichclusters <- c(whichclusters, max(whichclusters)+1L) # aggiungo il possibile cluster nuovo
-  # Uso "1L" per farlo venire integer, altrimenti il "+1" lo rende un float
-  
-  # whichcluster non è ordinata - e.g. può essere (2, 1, 3, 4) invece di c(1, 2, 3, 4) -,
-  #   ma non è un problema, perché alla fine della funzione utilizzo 
-  #   whichcluster[which.max(lll)], quindi l'importante è che ci sia corrispondenza
-  #   tra l'ordine di whichcluster e quello di lll (cosa che succede visto come
-  #   è creato logp)
+  whichclusters <- c(whichclusters, max(whichclusters)+1L) # I add the possible new cluster
   
   means <- drop(spline_basis[, -j] %*% beta_i[-j])
-  means_list <- c()
+  beta_list <- c()
+  # tmp_means_list <- c()
   prob_cit_list <- c()
   check_list <- c()
+  
+  # I save this object because I will use it many times
+  spl_bas_j <- spline_basis[, j]
+  
+  
+  # I need to compute the indicator for the equality of the reduced partitions
+  #   at time t and t+1 with i assigned to the h-th cluster (see formula S.10 
+  #   of the suppl. material).
+  is.last_time <- identical(gamma_tp1, 'last time')
+  if (!(is.last_time)){
+    # \mathcal{R}_{t+1}
+    R_tp1 <- which(gamma_tp1 == 1)
+    
+    # I remove the i-th unit because its check will be computed inside the loop
+    R_tp1_mi <- R_tp1[R_tp1 != i]
+    
+    # Check for all units but the i-th one.
+    adj_t <- outer(lab_t[R_tp1_mi], lab_t[R_tp1_mi], function(x, y) as.integer(x == y))
+    adj_tp1 <- outer(lab_tp1, lab_tp1, function(x, y) as.integer(x == y))
+    check_tmp <- all(adj_t == adj_tp1[R_tp1_mi, R_tp1_mi])
+  }
+  
+  
   
   for (h in whichclusters){
     # Devo costruire la partizione con l'i-esima osservazione inserita
     #   nell'h-esimo cluster
-    lab_t.h <- lab_tmi
-    lab_t.h[i] <- h
     
-    # Nel paper di Page: Pr(c_it = h) e N(Y_it | bla bla).
-    if (h < max(whichclusters)){ # se il cluster è già esistente, devo usare il beta di quel cluster
-      beta <- beta_cluster[h]
-      prob_cit <- sum(lab_tmi == h)
-    } else { # If the cluster to which i is assigned is an empty one..
-      # The procedure in Neal's paper is a bit different from the one used in Page: 
-      #   - Page always sample a new value from the prior
-      #   - Neal sample a new value only if the cluster is actually new, i.e.
-      #       if obs. i was a singleton before the update and now it is assigned
-      #       to an empty cluster, than that cluster is its old one, so the 
-      #       value of beta is the old one.
-      if (sum(lab_t == k) == 1){
-        beta <- beta_cluster[k]
-      } else{
-        beta <- newclustervalue
-      }
-      prob_cit <- M
-    }
-    
-    # I beta che devo usare sono il vettore beta_i, sostituendo
-    #   per il j-esimo coeff. il beta che ho appena calcolato.
-    #
-    beta_i[j] <- beta
-    
-    # Nel paper di Page: indicatrice sulle partizioni ridotte
-    #   per prima cosa devo trovare la partizione ridotta
-    if (identical(gamma_tp1, 'last time')){
+    # Here I finish the computation of the indicator started before the loop.
+    #   If we are at the last time, then I set check = TRUE because there aren't
+    #   other partitions to compare with.
+    #   If we are not at the last time, then I check if the i-th unit is a 
+    #   constrained one and, if it is, then I check if the proposal "i to the 
+    #   h-th cluster" is valid.
+    if (is.last_time){
       check <- TRUE
     } else {
-      R_tp1 <- which(gamma_tp1 == 1)
+      if (check_tmp){
+        lab_t.h <- lab_t
+        lab_t.h[i] <- h
+        adj_t.h <- outer(lab_t.h[R_tp1], lab_t.h[R_tp1], function(x, y) as.integer(x == y))
+        check <- all(adj_t.h == adj_tp1[R_tp1, R_tp1])
+      } else {
+        cat("check_tmp FALSE \n")
+        check <- FALSE
+      }
       
-      lab_tp1.R <- rep(-1, length(lab_t))
-      lab_t.h.R <- rep(-1, length(lab_t))
-      
-      lab_t.h.R[R_tp1] <- lab_t.h[R_tp1]
-      lab_tp1.R[R_tp1] <- lab_tp1[R_tp1]
-      
-      check <- all(lab_t.h.R == lab_tp1.R)
     }
     
-    means_list <- cbind(means_list, means + beta*spline_basis[, j])
+    
+    
+    # If check is false, then it's useless to compute prob_cit because the 
+    #   total probability will however be 0. So I set prob_cit = 0 (but every 
+    #   constant would be ok, because it will be multiplied by 0).
+    if (check){
+      if (h %in% non_empty_clust){ # se il cluster è già esistente, devo usare il beta di quel cluster
+        beta <- beta_cluster[h]
+        prob_cit <- sum(lab_tmi == h)
+      } else { # If the cluster to which i is assigned is an empty one..
+        # The procedure in Neal's paper is a bit different from the one used in Page: 
+        #   - Page always sample a new value from the prior
+        #   - Neal sample a new value only if the cluster is actually new, i.e.
+        #       if obs. i was a singleton before the update and now it is assigned
+        #       to an empty cluster, than that cluster is its old one, so the 
+        #       value of beta is the old one.
+        if (sum(lab_t == k) == 1){
+          beta <- beta_cluster[k]
+        } else{
+          beta <- newclustervalue
+        }
+        prob_cit <- M
+      }
+      
+      # I beta che devo usare sono il vettore beta_i, sostituendo
+      #   per il j-esimo coeff. il beta che ho appena calcolato.
+      #
+    } else {
+      prob_cit <- 0
+      beta <- 0
+    }
+    
+    # means_list <- cbind(means_list, means + beta*spline_basis[, j])
+    # I change the part concerning the means so that I:
+    #   - call spline_basis[, j] just once, before the for loop
+    #   - I do the sum of means + beta... just once, after the for loop
+    beta_list <- c(beta_list, beta)
+    # tmp_means_list <- cbind(tmp_means_list, beta*spl_bas_j)
     prob_cit_list <- c(prob_cit_list, prob_cit)
     check_list <- c(check_list, check)
     
   }
   
-  
-  logpnorm_list <- colSums(dnorm(Y_it, 
-                                 mean = means_list,
-                                 sd = sigma_i,
-                                 log = TRUE))
+  logpnorm_list <- colSums(-0.5*log(2*pi*sigma_i^2) - 0.5/sigma_i^2 * (Y_it - means - outer(spl_bas_j, beta_list))^2)
   
   logp <- log(prob_cit_list) + logpnorm_list + log(check_list)
   
   # Almeno nelle prime iterazioni sembra che le prob siano tutte 0, 
   #   quindi devo lavorare in scala logaritmica. Per campionare dalle 
   #   log-prob uso il trick del max con la Gumbel.
-  # lll <- logp + min(abs(min(logp)), .Machine$double.xmax)
-  # gumbel <- -log(-log(runif(length(lll))))
-  # lll <- lll + gumbel
   gumbel <- -log(-log(runif(length(logp))))
   lll <- logp + gumbel
   
@@ -299,14 +356,13 @@ up_label_i <- function(i, j,
 
 
 
-
 ## ### ### ### ### ##
 #### UPDATE BETA ####
 ## ### ### ### ### ##
 up_beta <- function(j, k, t,
                     Y_t,
                     beta_t,
-                    theta_jt, tau_jt,
+                    phi_jt, delta_j,
                     sigma_vec,
                     labels_t,
                     spline_basis){
@@ -317,10 +373,12 @@ up_beta <- function(j, k, t,
   ### - Y_t: matrix with Y_{ixt} for all obs. i and all obs. x
   ### - beta_t: matrice con i beta per tutti i cluster per tutti i coeff. 
   ###           al tempo t
-  ### - theta_jt, tau_jt: media e varianza della prior dei beta
+  ### - theta_jt, delta_j: media e sd della prior dei beta
   ### - sigma_vec: vettore con le sd delle osservazioni
   ### - labels_t: matrice delle label al tempo t per tutti i coeff.
   ### - spline_basis: matrice con i valori delle basi spline
+  
+  n <- length(sigma_vec)
   
   # Devo trovare quali osservazioni appartengono al cluster k per il 
   #   e coeff. j e poi uso conjugacy Gauss-Gauss.
@@ -334,27 +392,27 @@ up_beta <- function(j, k, t,
   
   # Devo recuperare i beta giusti per ogni osservazione per ogni coeff. != j
   p <- ncol(spline_basis)
-  beta_actual <- vapply(1:p, 
-                        function(x) beta_t[labels_t[ , x], x],
-                        FUN.VALUE = double(4))[obs, -j] # tolgo la j-esima colonna
-                                                        # e le oss. non nel cluster
+  beta_minusj_units_clusterk <- vapply(1:p, 
+                                       function(x) beta_t[labels_t[ , x], x],
+                                       FUN.VALUE = double(n))[obs, -j] # tolgo la j-esima colonna
+  # e le oss. non nel cluster
   # Costruisco effettivamente \tilde{Y}_t
-  Y_t.tilde <- Y_t[obs, ] - beta_actual %*% t(spline_basis[ , -j])
+  Y_t.tilde <- Y_t[obs, ] - beta_minusj_units_clusterk %*% t(spline_basis[ , -j])
   # Se Y_t.tilde ha una riga sola, lo trasformo in vettore; se ha più di 
   #   una riga, non succede niente.
   Y_t.tilde <- drop(Y_t.tilde)
   
   
   # Devo togliere le sigma_i delle osservazioni che non usiamo
-  sigma_vec <- sigma_vec[obs]
+  sigma_clusterk <- sigma_vec[obs]
   
   
   # Varianza a posteriori
-  var.post <- ( 1 / tau_jt^2 + sum(1/sigma_vec^2)*sum(spline_basis[, j]^2) )^(-1)
+  var.post <- ( 1 / delta_j^2 + sum(1/sigma_clusterk^2)*sum(spline_basis[, j]^2) )^(-1)
   # Media a posteriori
   mean.post <- var.post * 
-    ( sum( t(t(Y_t.tilde)*spline_basis[ , j])/sigma_vec^2 ) + 
-        theta_jt / tau_jt^2 )
+    ( sum( t(t(Y_t.tilde)*spline_basis[ , j])/sigma_clusterk^2 ) + 
+        phi_jt / delta_j^2 )
   # Devo fare il doppio trasposto per sfruttare bene il prodotto element-wise
   
   beta_updated <- rnorm(1, mean = mean.post, sd = sqrt(var.post))
@@ -382,156 +440,6 @@ GaussGaussUpdate_iid <- function (xbar, n, datavar, priormean, priorvar)
   
   res <- c(postmean = postmean, postvar = postvar)
   return(res)
-}
-
-
-
-
-
-### ### ### ### ### ##
-#### UPDATE THETA ####
-### ### ### ### ### ##
-up_theta_jt <- function(beta_jt,
-                        tau_jt,
-                        phi_j,
-                        delta_j){
-  ### ### ### ### ### ### ### ### ### ### ### ### ### ###
-  ### - beta_jt: vector of beta_kjt for all clusters k
-  ### - the other parameters' names are clear
-  
-  x <- beta_jt[!is.na(beta_jt)]
-  xbar <- mean(x)
-  n <- length(x)
-  
-  postpar <- GaussGaussUpdate_iid(xbar = xbar,
-                                  n = n,
-                                  datavar = tau_jt^2,
-                                  priormean = phi_j,
-                                  priorvar = delta_j^2)
-  
-  out <- rnorm(1, 
-               mean = postpar[1], 
-               sd = sqrt(postpar[2]))
-  
-  return(out)
-}
-
-
-
-
-
-### ### #### ### ### 
-#### UPDATE PHI ####
-### ### #### ### ### 
-up_phi_j <- function(theta_j,
-                     delta_j,
-                     lambda,
-                     xi){
-  ### ### ### ### ### ### ### ### ### ### ### ### ### ###
-  ### - theta_j: vector with theta_jt for all t
-  ### - the other parameters' names are clear
-  
-  x <- theta_j
-  xbar <- mean(x)
-  n <- length(x)
-  
-  postpar <- GaussGaussUpdate_iid(xbar = xbar,
-                                  n = n,
-                                  datavar = delta_j^2,
-                                  priormean = lambda,
-                                  priorvar = xi^2)
-  
-  out <- rnorm(1, 
-               mean = postpar[1], 
-               sd = sqrt(postpar[2]))
-  
-  return(out)
-}
-
-
-
-
-
-### ### #### ### ### ## 
-#### UPDATE LAMBDA ####
-### ### #### ### ### ##
-up_lambda <- function(phi,
-                     xi,
-                     m0,
-                     s02){
-  ### ### ### ### ### ### ### ### ### ### ### ### ### ###
-  ### - phi: vector with phi_j for all j
-  ### - the other parameters' names are clear
-  
-  x <- phi
-  xbar <- mean(x)
-  n <- length(x)
-  
-  postpar <- GaussGaussUpdate_iid(xbar = xbar,
-                                  n = n,
-                                  datavar = xi^2,
-                                  priormean = m0,
-                                  priorvar = s02)
-  
-  out <- rnorm(1, postpar[1], sqrt(postpar[2]))
-  
-  return(out)
-}
-
-
-
-
-
-### ### ### ### ### ### ##
-#### UPDATE VARIANCES ####
-### ### ### ### ### ### ##
-# Function for the RW Metropolis (RWM) for tau, delta and xi
-# It is written to update one param. at a time
-up_sd.RWM <- function(val_now,
-                   eps,
-                   data,
-                   mean,
-                   hyppar){
-  ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ###
-  ### - val_now: vector w/ current value of tau_jt/delta_t/xi
-  ### - eps: RW step size
-  ### - data: object that as the role of data in the posterior update, so
-  ###         beta_kjt(for all k)/theta_jt(for all j)/phi_t(for all t) respectively
-  ### - mean: the mean of the distrib. of the "data", so respectively
-  ###         theta_jt/phi_t/lambda
-  ### - hyppar: hyperparam of prior, so respectively A_tau/A_delta/A_xi
-  
-  # Sample proposed value
-  val_prop <- runif(1, val_now - eps, val_now + eps)
-  
-  
-  # Vector with prob's of acceptance
-  
-  # Indicator to check if proposed values are in the domain
-  indicator <- (val_prop > 0 & val_prop < hyppar)
-  
-  if (indicator){
-    # Likelihood of current value and proposed one
-    likel_now <- sum(dnorm(data, 
-                           mean = mean, 
-                           sd = val_now,
-                           log = TRUE),
-                     na.rm = TRUE) 
-    likel_prop <- sum(dnorm(data, 
-                            mean = mean,
-                            sd = val_prop,
-                            log = TRUE),
-                      na.rm = TRUE)
-    logprob <- min(likel_prop - likel_now, 0)
-  } else {
-    logprob <- -Inf
-  }
-  
-  # Create output
-  acc <- (log(runif(1, 0, 1)) < logprob) 
-  out <- ifelse(acc, val_prop, val_now)
-  
-  return(out)
 }
 
 
