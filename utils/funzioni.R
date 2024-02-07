@@ -1,5 +1,5 @@
-# library(tidyverse)
-# library(mvtnorm)
+library(tidyverse)
+library(mvtnorm)
 library(mvnfast)
 library(mggd)
 
@@ -146,12 +146,12 @@ up_gamma_i <- function(i, gamma, alpha_t, lab_t, lab_tm1, M){
   R_tpi <- c(R_tmi, i)
   
   # uso il ".R" per indicare le partizioni ridotte
+  lab_tm1.R <- rep(-1, length(lab_t))
+  lab_tm1.R[R_tpi] <- lab_tm1[R_tpi]
   lab_t.R <- rep(-1, length(lab_t))
   lab_t.R[R_tpi] <- lab_t[R_tpi]
   
-  adj_tm1 <- outer(lab_tm1[R_tpi], lab_tm1[R_tpi], function(x, y) as.integer(x == y))
-  adj_t <- outer(lab_t[R_tpi], lab_t[R_tpi], function(x, y) as.integer(x == y))
-  check <- all(adj_tm1 == adj_t)
+  check <- all(lab_tm1.R == lab_t.R)
   
   # If check is false it's useless to do all computations, because the 
   #   probability will be always 0.
@@ -204,7 +204,6 @@ up_label_i <- function(i, j,
                        beta_cluster,
                        sigma_i,
                        lab_t, lab_tp1, gamma_tp1,
-                       newclustervalue,
                        spline_basis,
                        M) {
   
@@ -223,6 +222,7 @@ up_label_i <- function(i, j,
   ### - spline_basis: matrice con i valori delle basi spline
   
   n <- length(lab_t)
+  n_cl <- length(beta_cluster)
   
   # Cluster in cui è l'i-esima osservazione
   # k <- which(vapply(rho_t, is.element, el = i, FUN.VALUE = FALSE))
@@ -238,9 +238,6 @@ up_label_i <- function(i, j,
   #   if its dCRP is cluster size or M
   non_empty_clust <- unique(lab_tmi[lab_tmi > 0])
   
-  whichclusters <- unique(lab_tmi[lab_tmi > 0])
-  whichclusters <- c(whichclusters, max(whichclusters)+1L) # I add the possible new cluster
-  
   means <- drop(spline_basis[, -j] %*% beta_i[-j])
   beta_list <- c()
   # tmp_means_list <- c()
@@ -249,6 +246,11 @@ up_label_i <- function(i, j,
   
   # I save this object because I will use it many times
   spl_bas_j <- spline_basis[, j]
+  
+  # I create the following objects here, but I will use it inside the loop.
+  #   Up to now I used to build them inside the loop, but it is not necessary
+  #   since it these quantities do NOT depend on "h" in any way.
+  prob_empty_clust <- M / (n_cl - length(non_empty_clust))
   
   
   # I need to compute the indicator for the equality of the reduced partitions
@@ -263,14 +265,20 @@ up_label_i <- function(i, j,
     R_tp1_mi <- R_tp1[R_tp1 != i]
     
     # Check for all units but the i-th one.
-    adj_t <- outer(lab_t[R_tp1_mi], lab_t[R_tp1_mi], function(x, y) as.integer(x == y))
-    adj_tp1 <- outer(lab_tp1, lab_tp1, function(x, y) as.integer(x == y))
-    check_tmp <- all(adj_t == adj_tp1[R_tp1_mi, R_tp1_mi])
+    check_tmp <- all(lab_tmi[R_tp1_mi] == lab_tp1[R_tp1_mi])
+    
+    
+    # Here I compute the vector of the indicator's values for the i-th unit for 
+    #   the assignment of "i" to the different clusters. 
+    # I will use it inside the loop.
+    # I check if the i-th unit is a free one (!gamma_tp1[i]) and, if it 
+    #   is not, then I check if the proposal "i to the h-th cluster" is valid.
+    check_i <- !gamma_tp1[i] | (lab_tp1[i] == (1:n_cl))
   }
   
   
   
-  for (h in whichclusters){
+  for (h in 1:n_cl){
     # Devo costruire la partizione con l'i-esima osservazione inserita
     #   nell'h-esimo cluster
     
@@ -284,47 +292,42 @@ up_label_i <- function(i, j,
       check <- TRUE
     } else {
       if (check_tmp){
-        lab_t.h <- lab_t
-        lab_t.h[i] <- h
-        adj_t.h <- outer(lab_t.h[R_tp1], lab_t.h[R_tp1], function(x, y) as.integer(x == y))
-        check <- all(adj_t.h == adj_tp1[R_tp1, R_tp1])
+        check <- check_tmp & check_i[h]
       } else {
-        cat("check_tmp FALSE \n")
         check <- FALSE
       }
       
     }
     
+    # Since here we always have the beta's for all the clusters (even the empty 
+    #   ones), if the unit i is assigned to an empty cluster, I don't sample a 
+    #   new value for the beta because I already have it. I think this 
+    #   procedure is more similar to MacEachern&Muller1994 than to Neal200.
+    # I don't think this is a problem because at each iteration I update all
+    #   betas, also the ones corresponding to empty clusters.
+    beta <- beta_cluster[h]
     
     
     # If check is false, then it's useless to compute prob_cit because the 
     #   total probability will however be 0. So I set prob_cit = 0 (but every 
     #   constant would be ok, because it will be multiplied by 0).
     if (check){
-      if (h %in% non_empty_clust){ # se il cluster è già esistente, devo usare il beta di quel cluster
-        beta <- beta_cluster[h]
+      # Now the only difference between empty and non-empty clusters is the weight
+      #   given by the CRP. If the cluster is not empty than its weight is the 
+      #   size of the cluster, otherwise it's M divided by the number of empty 
+      #   clusters at that moment
+      if (h  %in% non_empty_clust){
         prob_cit <- sum(lab_tmi == h)
-      } else { # If the cluster to which i is assigned is an empty one..
-        # The procedure in Neal's paper is a bit different from the one used in Page: 
-        #   - Page always sample a new value from the prior
-        #   - Neal sample a new value only if the cluster is actually new, i.e.
-        #       if obs. i was a singleton before the update and now it is assigned
-        #       to an empty cluster, than that cluster is its old one, so the 
-        #       value of beta is the old one.
-        if (sum(lab_t == k) == 1){
-          beta <- beta_cluster[k]
-        } else{
-          beta <- newclustervalue
-        }
-        prob_cit <- M
+      } else { # If the cluster to which i is assigned is an empty one
+        prob_cit <- prob_empty_clust # M / (length(beta_cluster) - length(non_empty_clust))
+        # Now I compute this prob just once before the for loop because it does
+        #   NOT depend on "h".
+        # The division is not actually necessary because it could go into the
+        #   normalizing constant, but I'm explicitly including it so that I 
+        #   keep track of the "true" procedure that I'm following
       }
-      
-      # I beta che devo usare sono il vettore beta_i, sostituendo
-      #   per il j-esimo coeff. il beta che ho appena calcolato.
-      #
     } else {
       prob_cit <- 0
-      beta <- 0
     }
     
     # means_list <- cbind(means_list, means + beta*spline_basis[, j])
@@ -338,6 +341,29 @@ up_label_i <- function(i, j,
     
   }
   
+  
+  # logpnorm_list <- colSums(dnorm(Y_it, 
+  #                                mean = means + outer(spl_bas_j, beta_list),
+  #                                # "means" is sum_{h != j} beta_{h{c_iht}t} * g(x) for every x = 0, ..., 98
+  #                                # outer(spl_bas_j, beta_list) is a matrix with 
+  #                                #  r-th column equal to beta_r * g(x) for every x = 0, ..., 98.
+  #                                # So the sum of the two is a matrix with number
+  #                                #  of columns equal to the number of clusters
+  #                                #  and number of rows equal to the number of ages,
+  #                                #  where the r-th column is equal to the mean 
+  #                                #  of the Gaussian for Y_it if "i" is assigned
+  #                                #  to the r-th cluster.
+  #                                # In this way the log-density of the normal is
+  #                                #  computed for Y_it for every possible assignment
+  #                                #  of "i" to a cluster. This exploits the fact
+  #                                #  that R automatically recycles the vector Y_it
+  #                                #  to have the same size of the matrix passed to
+  #                                #  the argument "mean".
+  #                                # To check this, try to replace "Y_it" with 
+  #                                #  matrix(Y_it, nrow = length(Y_it), ncol = length(beta_cluster)).
+  #                                sd = sigma_i,
+  #                                log = TRUE))
+  
   logpnorm_list <- colSums(-0.5*log(2*pi*sigma_i^2) - 0.5/sigma_i^2 * (Y_it - means - outer(spl_bas_j, beta_list))^2)
   
   logp <- log(prob_cit_list) + logpnorm_list + log(check_list)
@@ -348,9 +374,10 @@ up_label_i <- function(i, j,
   gumbel <- -log(-log(runif(length(logp))))
   lll <- logp + gumbel
   
-  c_it <- whichclusters[which.max(lll)]
+  c_it <- which.max(lll)
   return(c_it)
 }
+
 
 
 
@@ -359,63 +386,25 @@ up_label_i <- function(i, j,
 ## ### ### ### ### ##
 #### UPDATE BETA ####
 ## ### ### ### ### ##
-up_beta <- function(j, k, t,
-                    Y_t,
-                    beta_t,
-                    phi_jt, delta_j,
-                    sigma_vec,
-                    labels_t,
-                    spline_basis){
-  ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ###
-  ### - j: indice del coefficiente di cui stiamo aggiornando la media
-  ### - k: indice del cluster di cui stiamo aggiornando la media
-  ### - t: istante temporale attuale
-  ### - Y_t: matrix with Y_{ixt} for all obs. i and all obs. x
-  ### - beta_t: matrice con i beta per tutti i cluster per tutti i coeff. 
-  ###           al tempo t
-  ### - theta_jt, delta_j: media e sd della prior dei beta
-  ### - sigma_vec: vettore con le sd delle osservazioni
-  ### - labels_t: matrice delle label al tempo t per tutti i coeff.
-  ### - spline_basis: matrice con i valori delle basi spline
+up_beta <- function(Y.t,
+                    l2v,
+                    l2m,
+                    obs,
+                    SIGinv,
+                    d_j,
+                    phi_j){
   
-  n <- length(sigma_vec)
-  
-  # Devo trovare quali osservazioni appartengono al cluster k per il 
-  #   e coeff. j e poi uso conjugacy Gauss-Gauss.
-  # obs <- lab2rho(labels_t[ , j])[[k]]
-  obs <- which(labels_t[ , j] == k)
-  
-  # Lavoro su \tilde{Y}_ixt, cioè le osservazioni Y_{ixt} meno le spline tranne
-  #   la j-esima, così che beta_jkt*g_j(x) sia la media di questa
-  #   nuova variabile. Inoltre tengo solo le osservazioni che servono, cioè 
-  #   quelle che per il coefficiente j appartengono al cluster k
-  
-  # Devo recuperare i beta giusti per ogni osservazione per ogni coeff. != j
-  p <- ncol(spline_basis)
-  beta_minusj_units_clusterk <- vapply(1:p, 
-                                       function(x) beta_t[labels_t[ , x], x],
-                                       FUN.VALUE = double(n))[obs, -j] # tolgo la j-esima colonna
-  # e le oss. non nel cluster
-  # Costruisco effettivamente \tilde{Y}_t
-  Y_t.tilde <- Y_t[obs, ] - beta_minusj_units_clusterk %*% t(spline_basis[ , -j])
-  # Se Y_t.tilde ha una riga sola, lo trasformo in vettore; se ha più di 
-  #   una riga, non succede niente.
-  Y_t.tilde <- drop(Y_t.tilde)
-  
-  
-  # Devo togliere le sigma_i delle osservazioni che non usiamo
-  sigma_clusterk <- sigma_vec[obs]
-  
-  
-  # Varianza a posteriori
-  var.post <- ( 1 / delta_j^2 + sum(1/sigma_clusterk^2)*sum(spline_basis[, j]^2) )^(-1)
+  # Posterior precision matrix
+  prec.post <- (SIGinv/d_j^2) + diag(l2v, ncol = ncol(SIGinv))
+  # Posterior varcov matrix
+  varcov.post <- mysolve(prec.post)
   # Media a posteriori
-  mean.post <- var.post * 
-    ( sum( t(t(Y_t.tilde)*spline_basis[ , j])/sigma_clusterk^2 ) + 
-        phi_jt / delta_j^2 )
-  # Devo fare il doppio trasposto per sfruttare bene il prodotto element-wise
+  mean.post <- varcov.post %*%  
+    ( (SIGinv/d_j^2) %*% phi_j + t(l2m)  )
   
-  beta_updated <- rnorm(1, mean = mean.post, sd = sqrt(var.post))
+  beta_updated <- drop(rmvn(1, 
+                            mu = mean.post, 
+                            sigma = varcov.post))
   
   return(beta_updated)
 }

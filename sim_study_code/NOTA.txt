@@ -1,0 +1,1 @@
+Questo codice è vecchio, manca la prior su M e si possono ancora muovere tutte le unità e non solo quelle con gamma=0.

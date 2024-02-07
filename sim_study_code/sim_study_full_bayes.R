@@ -2,13 +2,17 @@ rm(list=ls())
 library(splines2)
 
 setwd("C:/Users/RomanoGi/Desktop/Bocconi/Ricerca/mort_rates-clustering")
-load("data/death_rates_1x1/15_countries_preproc.RData")
+load("data/simdata_no_hierarchy/simulated_data_5countries.Rdata")
 source("utils/funzioni.R")
 
 
 set.seed(4238)
 
-data <- lapply(rates_male, log)
+
+data <- out$data
+str(data)
+
+
 
 
 
@@ -16,15 +20,14 @@ data <- lapply(rates_male, log)
 #### Basi B-Spline ####
 ### ### ### ### ### ###
 # Maximum age
-Z <- ncol(rates_male[[1]])
-ages <- as.numeric(colnames(rates_male[[1]]))
+ages <- 0:100
 ages_no0 <- ages[-1]
 
 # Construction of the spline basis functions
 S.temp <- bSpline(ages_no0, 
-                 knots = c(seq(5, 40, by = 5), 50, 60, seq(70, 95, by = 5)), 
-                 degree = 2, 
-                 intercept = TRUE)
+                  knots = out$knots, 
+                  degree = 2, 
+                  intercept = TRUE)
 # Il numero di basi B-spline è pari al numero di nodi interni più l'ordine
 #   scelto per le basi, che è pari al degree più uno. Quindi in questo caso
 #   il numero di basi B-spline è 16+3=19.
@@ -37,9 +40,9 @@ for (k in 1:K){
 # In più aggiungo una cornice a L come prima riga e prima colonna fatta tutta
 #   di 0 tranne l'elemento in posizione (1, 1) che è 1. In questo modo
 #   aggiungo anche l'età 0 e la base attiva solo in 0.
-S <- rbind(c(1, rep(0, K)),
+S <- rbind(c(1, rep(0, k)),
            cbind(rep(0, length(ages_no0)), S.temp)
-           )
+)
 colnames(S) <- NULL
 
 
@@ -51,19 +54,20 @@ colnames(S) <- NULL
 ### ### ### ### ### ### ### ### ### ### ###
 
 # Numero istanti temporali
-T_final <- nrow(rates_male[[1]]); T_final
+T_final <- ncol(data[[1]]); T_final
 # Numero stati considerati
 n <- length(data); n
 # Dimensione stato latente (-> numero coeff)
 p <- ncol(S); p
-# Varianza delle osservazioni
-alpha_sigma <- 2.1; beta_sigma <- 0.02
+# beta_sigma <- 100; alpha_sigma <- beta_sigma/est_sigma^2 + 1
+alpha_sigma <- 1; beta_sigma <- 0.01
 beta_sigma / (alpha_sigma - 1)
 beta_sigma^2 / (alpha_sigma - 1)^2 / (alpha_sigma - 2)
+
 # Hyperparams for the Beta prior on alpha
 a_alpha <- 1; b_alpha <- 1
 # Parametro di concentrazione del CRP
-a_M <- 2; b_M <- 1
+M <- 0.5
 # Sigma --> parte della matrice varcov dei vettori di beta
 l <- 3/2 # With l = 2 the correlations at distance (1, 2, 3, 4, 5, 6, 7) are
 # (0.88 0.61 0.32 0.14 0.04 0.01 0.00);
@@ -86,7 +90,8 @@ cholSIGinv <- solve(cholSIG)
 ### ### ### ### ### ### ### ### ### ###
 
 # Numero iterazioni
-n_iter <- 20000
+n_iter <- 10000
+
 
 
 
@@ -98,11 +103,10 @@ n_iter <- 20000
 #   the regression of the data on the B-spline basis. We do this for each year 
 #   and then we smooth the global trend through loess.
 GP_means_tmp <- matrix(NA, nrow = p, ncol = T_final)
-cat("Estimating mean-level of GPs through regression")
 for (t in 1:T_final){
   
   cat(t, "")
-  data_tmp <- sapply(data, function(x) x[t, ])
+  data_tmp <- sapply(data, function(x) x[, t])
   
   melt_tmp <- reshape2::melt(data_tmp)
   
@@ -120,7 +124,7 @@ for (t in 1:T_final){
   # matplot(data_tmp, type = "p", pch = 1)
   # lines(1:99, mod$coefficients %*% t(S), col = "gold", lwd = 2)
 }
-cat("\n")
+
 GP_means <- list()
 for (j in 1:p){
   df <- data.frame(x = 1:T_final, y = GP_means_tmp[j, ])
@@ -129,11 +133,7 @@ for (j in 1:p){
 
 
 # delta_j
-# vartot <- t(sapply(data, function(x) apply(x - t(GP_means_tmp) %*% t(S), 2, var)))
-# agesmax <- apply(S, 2, which.max) - 1
-# delta2_guess <- apply(vartot[ , agesmax+1], 2, max)
-# A_delta <- 2*sqrt(delta2_guess); eps_delta <- sqrt(delta2_guess)/3
-alpha_delta <- c(rep(3, 10), rep(11, 8), rep(3, 2)); beta_delta <- rep(1, p)
+alpha_delta <- 1; beta_delta <- 0.01
 beta_delta / (alpha_delta - 1)
 beta_delta^2 / (alpha_delta - 1)^2 / (alpha_delta - 2)
 
@@ -169,7 +169,7 @@ beta_res <- replicate(p,
 delta_res <- replicate(p,
                        array(NA,
                              dim = c(n_iter) # numero iterazioni
-                             ),
+                       ),
                        simplify = FALSE)
 
 
@@ -184,19 +184,16 @@ alpha_res <- replicate(p,
 sigma_res <- array(NA,
                    dim = c(n,
                            n_iter # numero iterazioni
-                           )
                    )
-M_res <- replicate(p, 
-                   array(NA, dim = c(n_iter)),
-                         simplify = F)
+)
 
 # Temp objects
 gamma_temp <- labels_temp <-
   beta_temp <- replicate(p,
                          array(NA,
-                                dim = c(n, # numero di osservazioni
-                                        ncol = T_final # numero istanti temporali
-                                        )
+                               dim = c(n, # numero di osservazioni
+                                       ncol = T_final # numero istanti temporali
+                               )
                          ),
                          simplify = FALSE)
 
@@ -204,14 +201,13 @@ delta_temp <- replicate(p, list(NA))
 alpha_temp <- replicate(p, list(NA))
 sigma_temp <- array(NA, dim = c(n))
 
-M_temp <- replicate(p, list(NA))
+
 
 
 
 ### ### ### ### ### ###
 ### Inizializzazioni ##
 ### ### ### ### ### ###
-cat("Initializing objects for Gibbs sampler")
 sigma_res[ , 1] <- sigma_temp <- sqrt(1/rgamma(n, shape = alpha_sigma, rate = beta_sigma))
 for (j in 1:p){
   
@@ -230,10 +226,8 @@ for (j in 1:p){
   #   loro dalla prior.
   gamma_res[[j]][ , , 1] <- gamma_temp[[j]][ , ] <- 0
   
-  M_res[[j]][1] <- M_temp[[j]] <- rgamma(1, shape = a_M, rate = b_M)
-  
   for (t in 1:T_final){
-    lab <- rho2lab(rCRP(n, M_temp[[j]]))
+    lab <- rho2lab(rCRP(n, M))
     labels_temp[[j]][, t] <- labels_res[[j]][, t, 1] <- lab
   }
   beta_res[[j]][ , , 1] <- beta_temp[[j]] <- 
@@ -241,9 +235,8 @@ for (j in 1:p){
          mu = GP_means[[j]],
          sigma = delta_temp[[j]] * cholSIG,
          isChol = TRUE)
-  
 }
-cat("\n")
+
 rm(j); rm(t)
 
 
@@ -252,12 +245,11 @@ rm(j); rm(t)
 ### ### ### ### ### ###
 ### GIBBS SAMPLING ####
 ### ### ### ### ### ###
-Y <- lapply(data, function(y) y[1:T_final, ])
-names(Y) <- substr(names(data), 1, 3)
+Y <- lapply(data, function(y) t(y))
 
 inizio <- last_time <- Sys.time()
 
-for (d in 5001:n_iter){ # Ciclo sulle iterazioni
+for (d in 2:n_iter){ # Ciclo sulle iterazioni
   
   for (j in 1:p){ # Ciclo sui coefficienti
     
@@ -280,8 +272,7 @@ for (d in 5001:n_iter){ # Ciclo sulle iterazioni
                                               gamma = gamma_temp[[j]][, t], 
                                               alpha_t = alpha_temp[[j]],
                                               lab_t = labels_temp[[j]][, t],
-                                              lab_tm1 = labels_temp[[j]][, t-1],
-                                              M = M_temp[[j]])
+                                              lab_tm1 = labels_temp[[j]][, t-1])
         }
       } # Fine ciclo sulle osservazioni per gamma
       
@@ -292,10 +283,9 @@ for (d in 5001:n_iter){ # Ciclo sulle iterazioni
       #   the i-th unit its labels to use to find beta_units are those at the 
       #   iteration d-1, that are those in labels_temp.
       beta_units <- vapply(1:p, 
-                            function(x) beta_temp[[x]][labels_temp[[x]][ , t], t],
-                            FUN.VALUE = double(n))
-      can_move <- which(gamma_temp[[j]][, t] == 0)
-      for (i in can_move){
+                           function(x) beta_temp[[x]][labels_temp[[x]][ , t], t],
+                           FUN.VALUE = double(n))
+      for (i in 1:n){
         
         # Non assegno qua anche a labels_res perché dovrò prima sistemarlo
         labels_temp[[j]][i, t] <-  up_label_i(i = i,
@@ -308,13 +298,12 @@ for (d in 5001:n_iter){ # Ciclo sulle iterazioni
                                               lab_tp1 = labels_temp[[j]][,t+1],
                                               gamma_tp1 = if (t == T_final) {'last time'}
                                               else {gamma_temp[[j]][, t+1]},
-                                              spline_basis = S,
-                                              M = M_temp[[j]])
+                                              spline_basis = S)
         
         
-      # In this version I must not reorder labels to avoid "gaps" anymore 
-      #   because now the value of the label is important because it 
-      #   corresponds to a particular curve of (beta_kj1, ..., beta_kjT).
+        # In this version I must not reorder labels to avoid "gaps" anymore 
+        #   because now the value of the label is important because it 
+        #   corresponds to a particular curve of (beta_kj1, ..., beta_kjT).
         
       } # Fine ciclo sulle osservazioni per labels
       
@@ -359,9 +348,9 @@ for (d in 5001:n_iter){ # Ciclo sulle iterazioni
       # Sum_{i : c_ijt = k} \tilde{y_ixt} / sigma_i^2 --> goes in the mean of 
       #   the posterior in the part that comes from the likelihood
       sum_y_sig_k <- vapply(1:T_final, 
-                          function(s) colSums( t(Y.tilde[s, , which(lab_j[, s] == k)])/
-                                                sigma_temp[which(lab_j[, s] == k)]^2 ), 
-                          FUN.VALUE = double(length(ages)))
+                            function(s) colSums( t(Y.tilde[s, , which(lab_j[, s] == k)])/
+                                                   sigma_temp[which(lab_j[, s] == k)]^2 ), 
+                            FUN.VALUE = double(length(ages)))
       # Sum_x g_j(x)*"term just computed" --> contribution of the likelihood 
       #   to the posterior mean
       lik2mean <- S[, j] %*% sum_y_sig_k
@@ -399,15 +388,15 @@ for (d in 5001:n_iter){ # Ciclo sulle iterazioni
     ### UPDATE DELTA ###
     delta_res[[j]][d] <- delta_temp[[j]] <-
       sqrt(1/rgamma(1, 
-                    shape = alpha_delta[j] + 0.5 * T_final * n,
-                    rate = beta_delta[j] + 
+                    shape = alpha_delta + 0.5 * T_final * n,
+                    rate = beta_delta + 
                       0.5 * sum( (t(cholSIGinv) %*% 
                                     (t(beta_temp[[j]]) - GP_means[[j]]))^2 ))
       )
     # REMEMBER THAT R GIVES THE UPPER TRIANGULAR PART OF THE CHOLESKY DECOMPOSITION
     
     
-
+    
     ### ### ### ### ####
     ### UPDATE ALPHA ###
     alpha_res[[j]][d] <- alpha_temp[[j]] <-
@@ -416,35 +405,23 @@ for (d in 5001:n_iter){ # Ciclo sulle iterazioni
                  a_alpha,
                  b_alpha)
     
-    ### ### ### ## #
-    ### UPDATE M ###
-    # Update Dirichlet Process concentration parameter with gamma prior
-    # Escobar 1995
-    eta_temp <- rbeta(1, M_temp[[j]] + 1, n)
-    k_temp <- length(unique(labels_temp[[1]][, 1]))
-    pi_temp <- (a_M + k_temp - 1)/(a_M + b_M*n + k_temp - n*log(eta_temp) - 1) 
-    coin_temp <- rbinom(1, 1, pi_temp)
-    M_res[[j]][d] <- M_temp[[j]] <- 
-      ifelse(coin_temp == 1, rgamma(1, a_M + k_temp, b_M - log(eta_temp)),
-             rgamma(1, a_M + k_temp - 1, b_M - log(eta_temp)))
     
+    ### ### ### ### ### ### ### ##
+    ### ### UPDATE SIGMA_i ### ###
+    means <- vapply(1:T_final,
+                    function(t) vapply(1:p, 
+                                       function(x) beta_temp[[x]][labels_temp[[x]][ , t], t],
+                                       FUN.VALUE = double(n)) %*% t(S),
+                    FUN.VALUE = matrix(1, n, length(ages))
+    )
+    for (i in 1:n){
+      sigma_res[i, d] <- sigma_temp[i] <- 
+        sqrt(1/rgamma(1, shape = alpha_sigma + 0.5 * T_final * length(ages),
+                      rate = beta_sigma + 0.5 * sum((Y[[i]] - t(means[i, , ]))^2))
+        )
+    }
   } # END OF FOR LOOP OVER COEFFICIENTS "j"
   
-  
-  ### ### ### ### ### ### ### ##
-  ### ### UPDATE SIGMA_i ### ###
-  means <- vapply(1:T_final,
-                  function(t) vapply(1:p, 
-                                     function(x) beta_temp[[x]][labels_temp[[x]][ , t], t],
-                                     FUN.VALUE = double(n)) %*% t(S),
-                  FUN.VALUE = matrix(1, n, length(ages))
-  )
-  for (i in 1:n){
-    sigma_res[i, d] <- sigma_temp[i] <- 
-      sqrt(1/rgamma(1, shape = alpha_sigma + 0.5 * T_final * length(ages),
-                    rate = beta_sigma + 0.5 * sum((Y[[i]] - t(means[i, , ]))^2))
-      )
-  }
   
   if ((d %% 50) == 1) {
     now <- Sys.time()
@@ -463,5 +440,4 @@ fine <- Sys.time()
 
 exec_time <- difftime(fine, inizio)
 
-# save.image("C:/Users/RomanoGi/Desktop/Bocconi/Ricerca/mort_rates-clustering/res/dynamic_on_beta/no_hierarchy/14_countries/full_bayes/res_prior_on_M_5000.RData")
-save.image("C:/Users/RomanoGi/Desktop/Bocconi/Ricerca/mort_rates-clustering/res/dynamic_on_beta/no_hierarchy/14_countries/full_bayes/res_prior_on_M_20000.RData")
+# save.image("C:/Users/RomanoGi/Desktop/Bocconi/Ricerca/mort_rates-clustering/res/dynamic_on_beta/no_hierarchy/sim_study/sim_study_full_bayes/res.RData")
